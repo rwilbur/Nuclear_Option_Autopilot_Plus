@@ -5,7 +5,7 @@ using UnityEngine;
 namespace AutopilotMod
 {
     internal enum LateralMode { Hdg, Att }
-    internal enum VerticalMode { Balt, Ralt, Vs }
+    internal enum VerticalMode { Balt, Ralt, Vs, Tf }
 
     /// <summary>Aircraft state in an aviation frame (nose-up / right-wing-down positive), SI units.</summary>
     internal struct FlightState
@@ -223,6 +223,7 @@ namespace AutopilotMod
             gammaRate = 0f;
             bankCmdSlewed = State.Bank;
             raltFiltered = State.RadarAlt;
+            TfReset();
             if (Rotorcraft) RotorEngage();
             ApEngaged = true;
             report("AUTOPILOT ENGAGED", false);
@@ -282,8 +283,27 @@ namespace AutopilotMod
 
         public void SelectVertical(VerticalMode m)
         {
+            if (m == VerticalMode.Tf && Rotorcraft)
+            {
+                report("TF N/A - ROTORCRAFT", true);
+                return;
+            }
+            // RALT and TF share the radar-altitude target: switching between them keeps it.
+            bool keepTarget = (m == VerticalMode.Tf && Vertical == VerticalMode.Ralt)
+                              || (m == VerticalMode.Ralt && Vertical == VerticalMode.Tf);
             Vertical = m;
-            SyncVertical();
+            if (!keepTarget) SyncVertical();
+            if (m == VerticalMode.Tf)
+            {
+                TgtRadarAlt = Mathf.Max(TgtRadarAlt, TfMinClearance);
+                TfReset();
+            }
+        }
+
+        /// <summary>The RALT button: selects RALT; pressed again it swaps between RALT and terrain following.</summary>
+        public void SelectRaltOrTf()
+        {
+            SelectVertical(Vertical == VerticalMode.Ralt && !Rotorcraft ? VerticalMode.Tf : VerticalMode.Ralt);
         }
 
         public void SyncLateral()
@@ -299,6 +319,7 @@ namespace AutopilotMod
             if (!State.Valid) return;
             TgtAltitude = Mathf.Max(State.Altitude, ApMath.MinAltitudeTarget);
             TgtRadarAlt = Mathf.Max(State.RadarAlt, cfg.GroundFloor.Value + 2f, ApMath.MinAltitudeTarget);
+            if (Vertical == VerticalMode.Tf) TgtRadarAlt = Mathf.Max(TgtRadarAlt, TfMinClearance);
             raltFiltered = State.RadarAlt;
             // V/S captures the current rate rounded to the display step
             float step = Units.VsStep(false);
@@ -344,6 +365,9 @@ namespace AutopilotMod
                 case VerticalMode.Ralt:
                     TgtRadarAlt = Mathf.Max(cfg.GroundFloor.Value, ApMath.MinAltitudeTarget, ApMath.Snap(TgtRadarAlt, dir, Units.RaltStep(coarse)));
                     break;
+                case VerticalMode.Tf:
+                    TgtRadarAlt = Mathf.Max(TfMinClearance, ApMath.Snap(TgtRadarAlt, dir, Units.RaltStep(coarse)));
+                    break;
                 default:
                     float lim = cfg.MaxClimbRate.Value;
                     TgtVs = Mathf.Clamp(ApMath.Snap(TgtVs, dir, Units.VsStep(coarse)), -lim, lim);
@@ -375,6 +399,7 @@ namespace AutopilotMod
             lastPps = pps;
             Rotorcraft = IsCollective(ac);
             if (Rotorcraft) BindRotorcraft(ac);
+            if (Rotorcraft && Vertical == VerticalMode.Tf) Vertical = VerticalMode.Ralt;   // jets only
             pilotPitch = inputs.pitch;
             pilotRoll = inputs.roll;
 
@@ -401,7 +426,7 @@ namespace AutopilotMod
                 HasFbw = fbw != null;
                 pitchAgility = fbw != null ? ApMath.Agility(FbwMaxPitchRate(fbw), 0.7f, 0.4f) : 1f;
                 rollAgility = fbw != null ? ApMath.Agility(FbwMaxRollRate(fbw), 5f, 0.5f) : 1f;
-                FlyVertical(fbw, dt);
+                FlyVertical(ac, fbw, dt);
                 FlyLateral(fbw, dt);
                 inputs.pitch = OutPitch;
                 inputs.roll = OutRoll;
@@ -465,7 +490,7 @@ namespace AutopilotMod
         // =====================================================================
         // Vertical: altitude / radar altitude / vertical speed
         // =====================================================================
-        private void FlyVertical(ControlsFilter.FlyByWire fbw, float dt)
+        private void FlyVertical(Aircraft ac, ControlsFilter.FlyByWire fbw, float dt)
         {
             FlightState s = State;
             float v = Mathf.Max(s.Speed, 40f);
@@ -480,11 +505,22 @@ namespace AutopilotMod
             float maxVs = cfg.MaxClimbRate.Value;
             float k = cfg.AltitudeGain.Value * Mathf.Min(sched, 1f);
             float a = cfg.AltitudeCaptureAccel.Value;
+            // Flight-path command slew (rad/s). Terrain following replaces the fixed rate with its ride's g.
+            bool tf = Vertical == VerticalMode.Tf;
+            float slewUp = 4f * Mathf.Deg2Rad, slewDown = slewUp;
             float vsCmd;
             switch (Vertical)
             {
                 case VerticalMode.Balt: vsCmd = ApMath.CaptureProfile(TgtAltitude - s.Altitude, k, a, maxVs); break;
                 case VerticalMode.Ralt: vsCmd = ApMath.CaptureProfile(TgtRadarAlt - raltFiltered, k, a, maxVs); break;
+                case VerticalMode.Tf:
+                    float aPull = Mathf.Clamp(cfg.TfPullG.Value, 0.3f, Mathf.Max(cfg.MaxPullG.Value, 0.3f)) * G;
+                    float aPush = Mathf.Clamp(cfg.TfPushG.Value, 0.2f, Mathf.Max(cfg.MaxPushG.Value, 0.2f)) * G;
+                    vsCmd = TfClimbRate(ac, v, k, aPull, aPush, dt);
+                    // The pull-up may use everything the pitch loop is allowed; the push-over stays near the ride's g.
+                    slewUp = Mathf.Max(cfg.MaxPullG.Value * G, aPull) / v;
+                    slewDown = Mathf.Min(1.5f * aPush, Mathf.Max(cfg.MaxPushG.Value * G, aPush)) / v;
+                    break;
                 default: vsCmd = Mathf.Clamp(TgtVs, -maxVs, maxVs); break;
             }
 
@@ -498,7 +534,7 @@ namespace AutopilotMod
             float maxGammaSin = Mathf.Sin(cfg.MaxFlightPathAngle.Value * Mathf.Deg2Rad);
             float gammaCmd = Mathf.Asin(Mathf.Clamp(vsCmd / v, -maxGammaSin, maxGammaSin));
             float gammaFloor = Mathf.Asin(Mathf.Clamp(floorVs / v, -maxGammaSin, maxGammaSin));
-            gammaCmdSlewed = Mathf.MoveTowards(gammaCmdSlewed, gammaCmd, 4f * Mathf.Deg2Rad * dt);
+            gammaCmdSlewed = Mathf.MoveTowards(gammaCmdSlewed, gammaCmd, (gammaCmd > gammaCmdSlewed ? slewUp : slewDown) * dt);
             // The floor is never delayed by the slew limiter.
             gammaCmdSlewed = Mathf.Max(gammaCmdSlewed, gammaFloor);
             CmdGammaDeg = gammaCmdSlewed * Mathf.Rad2Deg;
@@ -515,8 +551,14 @@ namespace AutopilotMod
                 gammaRate += ((gamma - gammaPrev) / dt - gammaRate) * (dt / (0.2f + dt));
             gammaPrev = gamma;
 
+            // Terrain following flies a moving flight-path command: feed its rate forward and damp only
+            // the difference from it, or the damping term would hold the jet seconds behind the terrain.
+            if (tf) tfCmdRate += ((gammaCmdSlewed - tfCmdPrev) / dt - tfCmdRate) * (dt / (0.2f + dt));
+            else tfCmdRate = 0f;
+            tfCmdPrev = gammaCmdSlewed;
+
             float qCmd = cfg.FlightPathGain.Value * sched * pitchAgility * (gammaCmdSlewed - gamma)
-                         - cfg.FlightPathDamping.Value * gammaRate + turnFf;
+                         - cfg.FlightPathDamping.Value * (gammaRate - tfCmdRate) + tfCmdRate + turnFf;
             qCmd = Mathf.Clamp(qCmd, -cfg.MaxPushG.Value * G / v, cfg.MaxPullG.Value * G / v + turnFf);
             CmdQ = qCmd;
 

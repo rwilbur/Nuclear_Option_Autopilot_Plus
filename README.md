@@ -6,7 +6,7 @@ like an MFD (20 bezel push-buttons, green-phosphor display). No Python, no virtu
 no ViGEmBus.
 
 ```
-            [A/P]   [HDG]   [ATT]   [BALT]  [RALT]
+            [A/P]   [HDG]   [ATT]   [BALT]  [RALT/TF]
   [STEP] +--------------------------------------+ [V/S]
   [ ^ ]  |  heading tape + bug                  | [ ^ ]
   [HDG]  |  HDG SEL | ALT HLD | SPD             | [ALT]
@@ -68,7 +68,7 @@ to 60) and `JpegQuality`. Frames are streamed (MJPEG) and encoded off the main t
 | **F6**          | `ShowHideMfd`          | Show / hide the MFD. |
 | **F7**          | `MfdCursor`            | MFD cursor on/off, so you can click the push-buttons. Drag the bezel to move an MFD; drag the grip in its bottom-right corner to resize it. |
 | **F9**          | `RadarCoveragePage`    | Radar coverage MFD over the game map: off → **ALL** friendly radars → **OWN** radar only → **ENEMY** radars at known positions → off. Green = the game would detect a target at the **TGT** height above ground there (**TGT ALT** = at your own current altitude); red = strong enough signal but hidden by terrain, the earth's curvature (radar horizon) or ground clutter; no colour = signal too weak. Each view has its own target RCS (ALL/OWN default 1, ENEMY defaults to your jet's current RCS), set with the **RCS** arrows (middle button = your own jet's RCS) or typed into the web mirror. With the F7 cursor: scroll to zoom, drag to pan, **MAP** shows the whole map, **FOLW** re-centres on your jet. Enemy units the game map shows (with its target filters applied) are drawn with their map icons and heading; click one to select it as a target, click again to deselect. |
-| **PgUp / PgDn** | `VerticalTargetUp` / `VerticalTargetDown` | Vertical target up/down (altitude, radar altitude, or V/S, depending on mode). |
+| **PgUp / PgDn** | `VerticalTargetUp` / `VerticalTargetDown` | Vertical target up/down (altitude, radar altitude / TF clearance, or V/S, depending on mode). |
 | **] / [**       | `HeadingRight` / `HeadingLeft` | Heading bug right/left (bank target in ATT mode). |
 | **= / -**       | `SpeedUp` / `SpeedDown` | Speed target up/down. |
 | **Shift** + any rocker | `CoarseStepModifier` | 10x step. The STEP button does the same for the on-screen arrows. |
@@ -100,12 +100,15 @@ the game doesn't already use.
 - Vertical: **BALT** holds barometric altitude. **RALT** holds radar altitude, for low-level
   and sea-skimming flight. **V/S** holds a vertical speed.
   Altitude and radar-altitude targets can't be set below 1 m.
+- **TF** (terrain following) is RALT with a forward look: press **RALT** a second time to
+  switch to it, and again to go back. See below.
 - **A/T** is independent of the A/P, as in real jets. It holds speed with the throttle.
 - **Heavy jets.** On airframes whose fly-by-wire allows little pitch or roll rate (the heavy
   bomber class), the flight-path and bank loops automatically use lower gains and a lower roll
   rate, so they don't outrun the airframe and oscillate.
 - Pressing an already-selected mode, or the target readout beside a rocker, re-syncs that
-  target to the current value. **SYNC** re-syncs everything.
+  target to the current value. **SYNC** re-syncs everything. The exception is **RALT**, which
+  swaps between RALT and TF and keeps the target; use the readout or SYNC to re-sync it.
 
 **Disconnects.** The A/P drops out with a warble tone and an amber message when:
 - you move the stick past `StickOverrideThreshold` (paddle-switch behaviour);
@@ -125,8 +128,27 @@ the A/T left it.
   (wingtips, nose, tail, gear) at least `GroundFloorMeters` (1.5 m) above the surface.
 - **Bank limit.** Near the water, bank is limited so the low wingtip can't dip in. The MFD shows
   `BANK LIM - LOW` while this is active, so heading changes are slow down there.
-- **No forward look.** The floor can't see terrain ahead, so RALT over hills is still on you.
-  The terrain warning below covers that.
+- **No forward look.** The floor and RALT can't see terrain ahead. Over hills, use TF.
+
+**Terrain following (TF).** Jets only. Press **RALT** twice (the button then reads **TF** and the
+MFD shows `TERR FLW`). The vertical rocker sets the clearance to hold, never less than
+`MinClearanceMeters` (20 m).
+- **What it does.** It holds the set clearance like RALT, but scans the terrain, ships and sea
+  along the track it is about to fly, including the turn HDG or ATT is making, across a corridor
+  wider than the wingspan. It starts each climb early enough to cross the high ground at the set
+  clearance and level, so it doesn't balloon over the crest, then follows the far side back down.
+- **Ride.** `PullUpG` (1.0) and `PushOverG` (0.5) in `[TerrainFollowing]` set how hard it pulls
+  and pushes. Higher values hug the ground closer. The faster you fly and the softer the ride,
+  the more it rides high over short, sharp hills: the jet can't turn its flight path that fast.
+- **Limits.** Climbs and descents go up to `MaxFlightPathAngle` (20°), not `MaxClimbRate`. Use the
+  A/T: nothing else holds your speed in a long climb. If terrain ahead is too steep to clear at
+  that angle, the MFD shows `TF CLIMB LIM` in amber. Take the jet and turn away. The terrain
+  warning below still works in TF.
+- **How far it looks.** `LookAheadSeconds` (15 s of flight, 1 to 8 km).
+- **What it can miss.** The scan is 40 points, refreshed ten times a second, not a solid picture.
+  A thin mast between points, or anything that isn't terrain, a building or a ship, isn't seen.
+  Aircraft and missiles aren't either.
+- **Cost.** About 400 downward raycasts a second, and only while TF is flying the jet.
 
 **Terrain warning ("Terrain, pull up").** This is on whether or not the A/P is engaged.
 - **How it decides.** Each physics tick it looks along your velocity vector for terrain, ships,
@@ -249,6 +271,8 @@ and the raw stick outputs.
 | Final settle onto altitude is slow | Raise `AltitudeGain` |
 | Sea skim wanders in height | Raise `FlightPathGain` (with `FlightPathDamping` about 1.25x it) |
 | Pull-up warning too early / late | `TerrainWarning.ReactionTime`, `PullUpG` |
+| TF rides too high over hills | Raise `TerrainFollowing.PullUpG` / `PushOverG`, or fly slower |
+| TF ride too violent | Lower `TerrainFollowing.PullUpG` / `PushOverG` |
 | Nose buzzes / twitches | Lower `PitchRateGain` |
 | Wings rock in HDG/ATT | Lower `BankGain`, then `RollRateGain` |
 | Settles a bit off bank target | Raise `RollRateIntegral` |
@@ -260,6 +284,7 @@ and the raw stick outputs.
 - `src/AutopilotPlugin.cs`: plugin entry point, aircraft binding, hotkeys, commands.
 - `src/FlightController.cs`: state sampling and control laws.
 - `src/RotorcraftLaws.cs`: control laws for the helicopters and the tiltwing.
+- `src/TerrainFollowing.cs`: the TF mode's look-ahead terrain scan.
 - `src/MfdFrame.cs`: shared MFD bezel, push-buttons and drawing (IMGUI).
 - `src/MfdPage.cs`: the A/P MFD page.
 - `src/Patches.cs`: Harmony hooks into the pilot input path.
@@ -273,5 +298,6 @@ and the raw stick outputs.
 - `src/SoundBank.cs`: loads the optional custom warning sounds.
 - `src/Units.cs`, `src/ApCommand.cs`, `src/DisconnectTone.cs`: helpers.
 - `src/ApMath.cs`: the control laws' pure arithmetic (no Unity or game types).
-- `tests/`: self-check of `ApMath.cs` plus a small offline model of the helicopter height loop.
+- `tests/`: self-check of `ApMath.cs` plus small offline models of the helicopter height loop and
+  of terrain following over ridges, a cliff and rolling hills.
   Run it with `dotnet run --project tests`; it needs no game files.

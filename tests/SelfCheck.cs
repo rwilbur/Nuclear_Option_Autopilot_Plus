@@ -2,7 +2,8 @@ using System;
 using AutopilotMod;
 
 /// <summary>
-/// Assert-based checks of src/ApMath.cs, plus a small offline model of the helicopter height loop.
+/// Assert-based checks of src/ApMath.cs, plus small offline models of the helicopter height loop
+/// and of terrain following.
 /// Exit code 0 = all passed. Run: dotnet run --project tests
 /// </summary>
 internal static class SelfCheck
@@ -56,8 +57,118 @@ internal static class SelfCheck
             Check(low > 1.5f, $"lift {lift}: 1 m/s^2 push-down at 3 m sags to {low:F2} m (floor 1.5 m)");
         }
 
+        // ---- terrain following ----
+        Check(float.IsNegativeInfinity(ApMath.TfComfortSlope(-5f, 500f, 0.26f, 8e-5f)), "terrain below needs no climb");
+        Check(float.IsNegativeInfinity(ApMath.TfComfortSlope(50f, 5000f, 0.26f, 8e-5f)), "a far-off hill needs no climb yet");
+        Check(Near(ApMath.TfComfortSlope(40f, 1000f, 0.26f, 8e-5f), 0.08f), "on the approach parabola the slope is kPush * d");
+        Check(ApMath.TfComfortSlope(600f, 1500f, 0.26f, 8e-5f) == 0.26f, "capped at the planned climb angle");
+        bool lim = false;
+        Check(ApMath.TfHardSlope(-100f, 1000f, 0.35f, 2e-4f, ref lim) < -0.15f && !lim, "terrain well below allows a descent");
+        Check(ApMath.TfHardSlope(500f, 1000f, 0.35f, 2e-4f, ref lim) == 0.35f && lim, "an unclimbable wall is flagged");
+
+        // Fighter at 250 m/s and a slow, sluggish heavy at 120 m/s, over ridges, a cliff and rolling hills.
+        foreach (bool heavy in new[] { false, true })
+        {
+            float v = heavy ? 120f : 250f;
+            foreach (int terrain in new[] { 0, 1, 2 })
+            {
+                TfModel(v, terrain, 60f, heavy ? 1.5f : 0.8f, heavy ? 0.4f : 1f, out float low, out float mean, out float crest);
+                string tag = $"TF v={v} terrain {terrain}";
+                Check(low > 45f, $"{tag}: clearance dipped to {low:F1} m (set 60)");
+                Check(mean < (heavy ? 100f : 160f), $"{tag}: mean clearance {mean:F1} m - not following the ground");
+                Check(crest > 50f && crest < 80f, $"{tag}: crossed the highest crest at {crest:F1} m");
+            }
+        }
+
         Console.WriteLine(failures == 0 ? "Self-check passed." : $"{failures} check(s) failed.");
         return failures == 0 ? 0 : 1;
+    }
+
+    private static float TfTerrain(int kind, float x)
+    {
+        switch (kind)
+        {
+            case 0:   // two sharp 400 m ridges with a valley between
+                return 400f * Math.Max(0f, 1f - Math.Abs(x - 12000f) / 1500f) + 400f * Math.Max(0f, 1f - Math.Abs(x - 17000f) / 1500f);
+            case 1:   // 300 m cliff up to a plateau, then a cliff back down
+                return x > 10000f && x < 18000f ? 300f : 0f;
+            default:  // rolling hills, growing out of a plain so the run starts settled
+                return Math.Min(1f, x / 6000f) * (150f + 120f * (float)Math.Sin(x / 900f) + 60f * (float)Math.Sin(x / 310f + 1f));
+        }
+    }
+
+    /// <summary>
+    /// Point-mass jet flown by the same terrain-following law as FlightController.FlyVertical: pitch
+    /// rate command -> pitch -> flight path through a lift lag; agility scales the flight-path gain
+    /// as it does on the heavy jets. Returns the lowest and mean
+    /// clearance and the clearance over the highest point of the terrain.
+    /// </summary>
+    private static void TfModel(float v, int terrain, float clearance, float liftLag, float agility, out float low, out float mean, out float crest)
+    {
+        const float dt = 0.02f, g = 9.81f;
+        const int n = 40;
+        const float maxGamma = 20f * (float)Math.PI / 180f, planGamma = 0.75f * maxGamma;
+        const float aPull = 1f * g, aPush = 0.5f * g, aPullMax = 1.5f * g, aPushMax = 1f * g;
+        var dist = new float[n];
+        var rel = new float[n];
+        float x = 0f, alt = TfTerrain(terrain, 0f) + clearance, gamma = 0f, theta = 0f;
+        float cmd = 0f, cmdPrev = 0f, cmdRate = 0f, gammaPrev = 0f, gammaRate = 0f;
+        float travelled = 0f, altAtSweep = alt, nearSlope = 0f, sinceSweep = 1f;
+        low = float.MaxValue;
+        crest = 0f;
+        float sum = 0f, top = float.MinValue;
+        int ticks = 0;
+        while (x < 40000f)
+        {
+            float ralt = alt - TfTerrain(terrain, x);
+            sinceSweep += dt;
+            if (sinceSweep >= 0.1f)
+            {
+                sinceSweep = 0f;
+                travelled = 0f;
+                altAtSweep = alt;
+                float look = Math.Max(1000f, Math.Min(8000f, v * 15f));
+                nearSlope = float.NegativeInfinity;
+                for (int i = 0; i < n; i++)
+                {
+                    dist[i] = ApMath.TfSampleDistance(i, n, look);
+                    rel[i] = TfTerrain(terrain, x + dist[i]) - alt;
+                    if (dist[i] >= 0.5f * v && dist[i] <= 2f * v)
+                        nearSlope = Math.Max(nearSlope, (rel[i] + ralt) / dist[i]);
+                }
+            }
+            float maxVs = v * (float)Math.Sin(planGamma);
+            float vsCmd = ApMath.CaptureProfile(clearance - ralt, 0.3f, 0.5f * aPull, maxVs) + ApMath.TfDescentFeedforward(nearSlope, v);
+            vsCmd = Math.Max(-maxVs, Math.Min(maxVs, vsCmd));
+            float slope = ApMath.TfSlope(dist, rel, n, travelled, alt - altAtSweep, clearance, v, gamma,
+                planGamma, maxGamma, aPull, aPush, 1f, out _);
+            if (!float.IsNegativeInfinity(slope)) vsCmd = Math.Max(vsCmd, v * (float)Math.Sin(slope));
+            float target = (float)Math.Asin(Math.Max(-Math.Sin(maxGamma), Math.Min(Math.Sin(maxGamma), vsCmd / v)));
+            cmd = target > cmd ? Math.Min(target, cmd + aPullMax / v * dt) : Math.Max(target, cmd - Math.Min(1.5f * aPush, aPushMax) / v * dt);
+            cmdRate += ((cmd - cmdPrev) / dt - cmdRate) * (dt / (0.2f + dt));
+            cmdPrev = cmd;
+            gammaRate += ((gamma - gammaPrev) / dt - gammaRate) * (dt / (0.2f + dt));
+            gammaPrev = gamma;
+            float q = 2f * agility * (cmd - gamma) - 2.5f * (gammaRate - cmdRate) + cmdRate;
+            q = Math.Max(-aPushMax / v, Math.Min(aPullMax / v, q));
+            theta += q * dt;
+            gamma += (theta - gamma) * dt / liftLag;
+            x += v * (float)Math.Cos(gamma) * dt;
+            alt += v * (float)Math.Sin(gamma) * dt;
+            travelled += v * (float)Math.Cos(gamma) * dt;
+
+            float h = TfTerrain(terrain, x);
+            float c = alt - h;
+            low = Math.Min(low, c);
+            sum += c;
+            ticks++;
+            if (h > top + 0.01f)
+            {
+                top = h;
+                crest = c;
+            }
+        }
+        mean = sum / ticks;
     }
 
     /// <summary>

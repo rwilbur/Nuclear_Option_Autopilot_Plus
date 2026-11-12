@@ -39,6 +39,12 @@ namespace AutopilotMod
         public ConfigEntry<float> PitchRateIntegralNoFbw;
         public ConfigEntry<float> GroundFloor;
 
+        // ---- terrain following ----
+        public ConfigEntry<float> TfLookAhead;
+        public ConfigEntry<float> TfPullG;
+        public ConfigEntry<float> TfPushG;
+        public ConfigEntry<float> TfMinClearance;
+
         // ---- lateral ----
         public ConfigEntry<float> HeadingGain;
         public ConfigEntry<float> MaxTurnRate;
@@ -121,6 +127,12 @@ namespace AutopilotMod
             PitchRateIntegralNoFbw = cfg.Bind(V, "PitchRateIntegralNoFbw", 1.5f, "Pitch-rate integral gain on aircraft WITHOUT fly-by-wire (this is what trims out the 1g stick force).");
             GroundFloor = cfg.Bind(V, "GroundFloorMeters", 1.5f, "Minimum clearance between the airframe's LOWEST point (wingtips, nose, tail, gear) and the water/ground. In every A/P mode the sink rate is limited near it, and bank is limited so a wingtip can't dip below it.");
             FloorGain = cfg.Bind(V, "FloorGain", 1.0f, "How hard the floor pushes back: allowed sink rate (m/s) per metre of clearance above the floor. Below the floor it commands a climb at the same rate.");
+
+            const string F = "TerrainFollowing";
+            TfLookAhead = cfg.Bind(F, "LookAheadSeconds", 15f, new ConfigDescription("How far ahead TF scans the terrain, in seconds of flight (never less than 1 km or more than 8 km). Longer sees tall terrain sooner.", new AcceptableValueRange<float>(5f, 30f)));
+            TfPullG = cfg.Bind(F, "PullUpG", 1.0f, "Ride hardness: extra g above 1g that TF plans its pull-ups with (capped by MaxPullG). Higher = hugs the terrain closer and starts climbs later.");
+            TfPushG = cfg.Bind(F, "PushOverG", 0.5f, "Ride hardness: g below 1g that TF plans its push-overs across crests and into valleys with (capped by MaxPushG). Higher = follows downslopes closer; 1.0 is weightless.");
+            TfMinClearance = cfg.Bind(F, "MinClearanceMeters", 20f, "Lowest clearance target TF accepts (m). The terrain scan is a row of points, not a solid picture, so keep some margin; use RALT for flat ground and the sea.");
 
             const string L = "Tuning.Lateral";
             HeadingGain = cfg.Bind(L, "HeadingGain", 0.35f, "Heading error (deg) -> commanded turn rate (deg/s).");

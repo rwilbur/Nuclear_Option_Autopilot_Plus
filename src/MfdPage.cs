@@ -8,7 +8,7 @@ namespace AutopilotMod
     /// side) around a green-phosphor A/P page. Buttons are clickable whenever the mouse cursor is
     /// visible (MFD cursor key, map open, menus); every function also has a hotkey.
     ///
-    ///            T1 A/P   T2 HDG   T3 ATT   T4 BALT  T5 RALT
+    ///            T1 A/P   T2 HDG   T3 ATT   T4 BALT  T5 RALT/TF
     ///   L1 STEP  +--------------------------------------+  R1 V/S
     ///   L2 ^     |  heading tape                        |  R2 ^
     ///   L3 HDG   |  mode annunciators / messages        |  R3 ALT
@@ -117,6 +117,10 @@ namespace AutopilotMod
             {
                 Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), $"ROTOR RPM LIM {ap.RotorNr * 100f:0}%", 0.028f, Amber, TextAnchor.MiddleCenter);
             }
+            else if (apOn && ap.Vertical == VerticalMode.Tf && ap.TfClimbLimited)
+            {
+                Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), "TF CLIMB LIM", 0.028f, Amber, TextAnchor.MiddleCenter);
+            }
             else if (apOn && ap.BankLimitedBySurface)
             {
                 Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), "BANK LIM - LOW", 0.028f, Amber, TextAnchor.MiddleCenter);
@@ -163,7 +167,11 @@ namespace AutopilotMod
                     case ApCommand.ModeHdg: label = "HDG"; boxed = ap.Lateral == LateralMode.Hdg; break;
                     case ApCommand.ModeAtt: label = "ATT"; boxed = ap.Lateral == LateralMode.Att; break;
                     case ApCommand.ModeBalt: label = "BALT"; boxed = ap.Vertical == VerticalMode.Balt; break;
-                    case ApCommand.ModeRalt: label = "RALT"; boxed = ap.Vertical == VerticalMode.Ralt; break;
+                    case ApCommand.ModeRalt:
+                        // one button: RALT, pressed again TF (terrain following), again RALT
+                        label = ap.Vertical == VerticalMode.Tf ? "TF" : "RALT";
+                        boxed = ap.Vertical == VerticalMode.Ralt || ap.Vertical == VerticalMode.Tf;
+                        break;
                     case ApCommand.ModeVs: label = "V/S"; boxed = ap.Vertical == VerticalMode.Vs; break;
                     case ApCommand.StepToggle: label = ap.CoarseStep ? "STEP\nCRSE" : "STEP\nFINE"; break;
                     case ApCommand.DataToggle: label = "DATA"; boxed = cfg.ShowDebug.Value; break;
@@ -202,6 +210,7 @@ namespace AutopilotMod
                     {
                         case VerticalMode.Balt: tag = "ALT " + Units.AltUnit; value = $"{Units.Alt(ap.TgtAltitude):F0}"; break;
                         case VerticalMode.Ralt: tag = "RALT " + Units.AltUnit; value = $"{Units.Alt(ap.TgtRadarAlt):F0}"; break;
+                        case VerticalMode.Tf: tag = "TF " + Units.AltUnit; value = $"{Units.Alt(ap.TgtRadarAlt):F0}"; break;
                         default: tag = "V/S " + Units.VsUnit; value = $"{Units.Vs(ap.TgtVs):+0;-0;0}"; break;
                     }
                     break;
@@ -222,7 +231,8 @@ namespace AutopilotMod
         {
             float w = r.width / 3f;
             string lat = ap.Lateral == LateralMode.Hdg ? "HDG SEL" : "ATT HLD";
-            string vert = ap.Vertical == VerticalMode.Balt ? "ALT HLD" : ap.Vertical == VerticalMode.Ralt ? "RALT HLD" : "V/S";
+            string vert = ap.Vertical == VerticalMode.Balt ? "ALT HLD" : ap.Vertical == VerticalMode.Ralt ? "RALT HLD"
+                : ap.Vertical == VerticalMode.Tf ? "TERR FLW" : "V/S";
             Annunciator(new Rect(r.x, r.y, w, r.height), lat, apOn);
             Annunciator(new Rect(r.x + w, r.y, w, r.height), vert, apOn);
             Annunciator(new Rect(r.x + 2f * w, r.y, w, r.height), ap.Rotorcraft && ap.TgtSpeed == 0f ? "HVR HLD" : "SPD", ap.AtEngaged);

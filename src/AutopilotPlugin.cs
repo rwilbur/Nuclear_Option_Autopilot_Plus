@@ -253,7 +253,7 @@ namespace AutopilotMod
                 case ApCommand.ModeHdg: ap.SelectLateral(LateralMode.Hdg); break;
                 case ApCommand.ModeAtt: ap.SelectLateral(LateralMode.Att); break;
                 case ApCommand.ModeBalt: ap.SelectVertical(VerticalMode.Balt); break;
-                case ApCommand.ModeRalt: ap.SelectVertical(VerticalMode.Ralt); break;
+                case ApCommand.ModeRalt: ap.SelectRaltOrTf(); break;
                 case ApCommand.ModeVs: ap.SelectVertical(VerticalMode.Vs); break;
                 case ApCommand.LatUp: ap.NudgeLateral(+1, coarse); break;
                 case ApCommand.LatDown: ap.NudgeLateral(-1, coarse); break;
