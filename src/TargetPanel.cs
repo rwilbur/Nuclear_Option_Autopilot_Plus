@@ -118,8 +118,7 @@ namespace AutopilotMod
         {
             TargetListSelector t = Collect();
             if (t == null) return;
-            int.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n);
-            bool valid = n >= 0 && n < toggles.Count;
+            bool valid = int.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) && n >= 0 && n < toggles.Count;
             switch (action)
             {
                 case "toggle" when valid: toggles[n].Toggle(); break;

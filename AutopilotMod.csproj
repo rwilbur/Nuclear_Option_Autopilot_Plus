@@ -72,13 +72,15 @@
       <Private>false</Private>
     </Reference>
 
-    <!-- The game's own gameplay assembly - contains Aircraft, ControlInputs, PilotPlayerState, etc. -->
     <Reference Include="UnityEngine.UI">
       <HintPath>$(ManagedDir)\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="Unity.TextMeshPro">
       <HintPath>$(ManagedDir)\Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
     </Reference>
+    <!-- The game's own gameplay assembly - contains Aircraft, ControlInputs, PilotPlayerState, etc. -->
     <Reference Include="Assembly-CSharp">
       <HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath>
       <Private>false</Private>

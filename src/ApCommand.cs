@@ -35,5 +35,8 @@ namespace AutopilotMod
         RdrFollow,
         RdrMap,
         RdrEnemy,
+        RdrRcsUp,
+        RdrRcsDown,
+        RdrRcsOwn,
     }
 }

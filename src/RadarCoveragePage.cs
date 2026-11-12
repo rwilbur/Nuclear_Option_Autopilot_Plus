@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.UI;
@@ -7,20 +8,24 @@ namespace AutopilotMod
 {
     /// <summary>
     /// Radar-coverage MFD page over the game's own map image, north-up. ALL shows every friendly
-    /// radar; OWN shows only your jet's radar inside its scan cone. Green = a target at the TGT
-    /// height above the ground is in range, inside the radar's cone, and in line of sight.
-    /// Red = in range but hidden behind terrain. Red triangles/squares = enemy contacts the game map
+    /// radar; OWN shows only your jet's radar inside its scan cone. Green = the game would detect a
+    /// target at the TGT height above the ground there: inside the radar's cone, in line of sight,
+    /// above the radar horizon and with enough signal after ground clutter. Red = strong enough
+    /// signal but hidden by terrain, the horizon or clutter. No colour = signal too weak.
+    /// ALL/OWN default to a reference target of RCS 1. Red triangles/squares = enemy contacts the game map
     /// shows (same map filters), pointing along their map heading.
-    /// ENMY shows enemy radars at the positions your side knows (its tracking data), colours
-    /// swapped: red = the enemy sees a target there, green = hidden behind terrain.
-    /// A jammed radar (Radar.IsJammed: it detects nothing) adds no coverage; its site turns amber.
+    /// ENMY shows enemy radars at the positions your side knows (its tracking data), for a target
+    /// of the RCS set (default: your own jet's), colours swapped: red = the enemy sees you there,
+    /// green = hidden. A jammed radar (Radar.IsJammed: it detects nothing) adds no coverage; its
+    /// site turns amber. Doppler and ECM are left out: without ECM they can't change the result.
     ///
     ///            T1 ALL   T2 OWN   T3 ENMY  T4 TGT   T5 HIDE
     ///   L1 FOLW  +--------------------------------------+  R1 -
     ///   L2 MAP   |                                      |  R2 ^ (zoom in)
-    ///            |  map + coverage (scroll = zoom,      |  R3 RNG
-    ///            |  drag = pan)                         |  R4 v (zoom out)
-    ///            +--------------------------------------+
+    ///   L3 ^RCS  |  map + coverage (scroll = zoom,      |  R3 RNG
+    ///   L4 RCS   |  drag = pan)                         |  R4 v (zoom out)
+    ///   L5 vRCS  +--------------------------------------+
+    ///   (L4 = back to own RCS)
     ///
     /// The map's terrain is raycast once into a TerrainHeightGrid. Each radar's polar profile
     /// (Az bearings x Steps range bins) is read from that grid over a few frames, and redone when
@@ -31,9 +36,10 @@ namespace AutopilotMod
     {
         public enum Mode { All, Own, Enemy }
 
-        private const int Az = 360, Steps = 200, Tex = 512;
+        private const int Az = 360, Steps = 400, Tex = 512;
         private const float MinRange = 2000f;
-        private static readonly float[] AglsM = { 5f, 30f, 150f, 500f, 2000f };
+        private static readonly float[] AglsM = { 5f, 30f, 150f, 500f, 2000f, -1f }; // -1 = ALT: own altitude
+        private const float MinAgl = 5f;
 
         private static readonly AccessTools.FieldRef<Radar, float> RadarConeRef =
             AccessTools.FieldRefAccess<Radar, float>("radarCone");
@@ -54,6 +60,9 @@ namespace AutopilotMod
             new Osb { Side = Side.Top, Index = 4, Command = ApCommand.RdrHide, Glyph = Glyph.Text },
             new Osb { Side = Side.Left, Index = 0, Command = ApCommand.RdrFollow, Glyph = Glyph.Text },
             new Osb { Side = Side.Left, Index = 1, Command = ApCommand.RdrMap, Glyph = Glyph.Text },
+            new Osb { Side = Side.Left, Index = 2, Command = ApCommand.RdrRcsUp, Glyph = Glyph.Up },
+            new Osb { Side = Side.Left, Index = 3, Command = ApCommand.RdrRcsOwn, Glyph = Glyph.Text },
+            new Osb { Side = Side.Left, Index = 4, Command = ApCommand.RdrRcsDown, Glyph = Glyph.Down },
             new Osb { Side = Side.Right, Index = 1, Command = ApCommand.RdrZoomIn, Glyph = Glyph.Up },
             new Osb { Side = Side.Right, Index = 3, Command = ApCommand.RdrZoomOut, Glyph = Glyph.Down },
         };
@@ -68,17 +77,23 @@ namespace AutopilotMod
             public bool Valid, Jammed, Enemy;
             public float ConeHeading = float.NaN; // enemy: heading off its map icon (deg); NaN = unknown
             public float ConePitch = float.NaN;   // enemy: antenna pitch while that heading is live, then the last one (deg); NaN = never known
-            public float[] Height = new float[Az * Steps]; // terrain height above sea level at each bin's far edge (m)
-            public float[] Before = new float[Az * Steps]; // steepest terrain slope seen from the radar inside the bin, short of its far edge
+            public float[] Height; // terrain height above sea level at each bin's far edge (m); null until the first sweep is done
+            public float[] Before; // steepest terrain slope seen from the radar inside the bin, short of its far edge
             public readonly byte[] Vis = new byte[Az * Steps];
-            public float VisAgl = -1f;        // target height Vis was computed for; -1 = stale
+            public float VisAgl = float.NaN, VisRcs, VisRadius; // target Vis was computed for (VisAgl: height key); NaN = stale
 
             // Sweep in progress: written into back buffers over several frames, then swapped in.
             public GlobalPosition NextOrigin;
             public float NextRange, NextAlt;
             public int RaysDone = Az;
-            public float[] NextHeight = new float[Az * Steps], NextBefore = new float[Az * Steps];
+            public float[] NextHeight, NextBefore; // rented from `spare` only while a sweep runs
         }
+
+        // Back buffers are shared: a radar holds a pair only during its sweep, which halves the
+        // memory the profiles keep (about 1.2 MB per radar instead of 2.4 MB).
+        private static readonly Stack<float[]> spare = new Stack<float[]>();
+
+        private static float[] Rent() => spare.Count > 0 ? spare.Pop() : new float[Az * Steps];
 
         private const int SampleBudget = 50000; // terrain lookups per frame for profile sweeps
 
@@ -90,6 +105,7 @@ namespace AutopilotMod
 
         // The overlay is rasterised a few radars per frame into `state`, then uploaded in one go.
         private const int PixelBudget = 60000;
+        private const int ViewshedCost = 20000;     // one line-of-sight pass, in pixels of that budget
         private readonly List<Profile> building = new List<Profile>();
         private int buildIdx;
         private bool buildActive;
@@ -195,6 +211,9 @@ namespace AutopilotMod
                     int i = System.Array.IndexOf(AglsM, cfg.RadarTargetAgl.Value);
                     cfg.RadarTargetAgl.Value = AglsM[(i + 1) % AglsM.Length];
                     break;
+                case ApCommand.RdrRcsUp: RcsSetting.Value = Mathf.Min(TargetRcs() * 2f, 1000f); break;
+                case ApCommand.RdrRcsDown: RcsSetting.Value = Mathf.Max(TargetRcs() * 0.5f, 0.001f); break;
+                case ApCommand.RdrRcsOwn: RcsSetting.Value = 0f; break;
                 case ApCommand.RdrZoomIn: Zoom(0.5f); break;
                 case ApCommand.RdrZoomOut: Zoom(2f); break;
                 case ApCommand.RdrFollow: follow = true; break;
@@ -206,6 +225,14 @@ namespace AutopilotMod
             }
             dirty = true;
         }
+
+        /// <summary>RCS setting of the current view: ENMY, or ALL/OWN (friendly radars).</summary>
+        private ConfigEntry<float> RcsSetting => Current == Mode.Enemy ? cfg.RadarEnemyRcs : cfg.RadarFriendlyRcs;
+
+        /// <summary>RCS the current view is drawn for: the set value, or 0 = own jet's live RCS (grows with stores).</summary>
+        private float TargetRcs() => RcsSetting.Value > 0f ? RcsSetting.Value : me != null ? me.RCS : 1f;
+        private float lastRcs;
+        private float altSnap = -1000f; // own altitude (m above sea level) TGT ALT is drawn for
 
         private float MapHalfSize() => mapSettings != null ? Mathf.Max(mapSettings.MapSize.x, mapSettings.MapSize.y) * 0.5f : 100000f;
 
@@ -237,6 +264,9 @@ namespace AutopilotMod
             {
                 nextContacts = now + 0.25f;
                 CollectContacts();
+                float rcs = TargetRcs();
+                if (rcs != lastRcs) dirty = true; // stores released, or set from the web mirror
+                lastRcs = rcs;
                 jammedCount = 0;
                 // enemy jam state only when the game map shows it too (its jammed markers)
                 MapOptions mo = SceneSingleton<MapOptions>.i;
@@ -275,6 +305,14 @@ namespace AutopilotMod
                 viewZ = g.z;
             }
 
+            // TGT ALT: redraw once own altitude moves 3% (at least 25 m) from what was drawn
+            float alt = me.GlobalPosition().y;
+            if (cfg.RadarTargetAgl.Value < 0f && Mathf.Abs(alt - altSnap) > Mathf.Max(25f, altSnap * 0.03f))
+            {
+                altSnap = alt;
+                dirty = true;
+            }
+
             if (buildActive) ContinueBuild();
             else if (now >= nextBuild && (dirty || ViewMoved()))
             {
@@ -302,7 +340,9 @@ namespace AutopilotMod
             foreach (Unit u in UnitRegistry.allUnits)
             {
                 TargetDetector r = u != null ? u.radar : null;
-                if (r == null || u.disabled || r.GetRadarRange() <= 0f || r.GetScanPoint() == null) continue;
+                // fire-control radars are also set on their launchers (FireControl.RegisterRadar): take
+                // each radar once, from the unit it sits on, so ENMY places it at that unit's known position
+                if (r == null || u.disabled || r.GetAttachedUnit() != u || r.GetRadarRange() <= 0f || r.GetScanPoint() == null) continue;
                 GlobalPosition scan = r.GetScanPoint().GlobalPosition();
                 bool isOwn = u == me;
                 if (enemy)
@@ -334,10 +374,10 @@ namespace AutopilotMod
                     // Redo the profile once the radar has moved 2% of its range (others' 5%: many moving
                     // friendly radars would otherwise keep sweeping every frame), or its range changed.
                     float moved = (kv.Value - p.Origin).magnitude;
-                    if (moved > p.Range * (r == me.radar ? 0.02f : 0.05f) || Mathf.Abs(r.GetRadarRange() - p.Range) > 1f) TakeProfile(p, kv.Value);
+                    if (moved > p.Range * (r == me.radar ? 0.02f : 0.05f) || Mathf.Abs(SweepRange(r) - p.Range) > 1f) TakeProfile(p, kv.Value);
                 }
             }
-            // The other side's profiles are kept (switching modes would otherwise reallocate ~1 MB per
+            // The other side's profiles are kept (switching modes would otherwise reallocate ~2.5 MB per
             // radar in one frame); they go once their radar is destroyed.
             var dead = new List<TargetDetector>();
             foreach (KeyValuePair<TargetDetector, Profile> kv in profiles)
@@ -403,11 +443,17 @@ namespace AutopilotMod
             return map.mapImage.transform.eulerAngles.z - icon.iconImage.transform.eulerAngles.z;
         }
 
+        /// <summary>
+        /// The game checks targets out to 2x maxRange (Radar.RadarCheck); signal strength decides the
+        /// rest, and a large RCS reaches past maxRange.
+        /// </summary>
+        private static float SweepRange(TargetDetector r) => r.GetRadarRange() * 2f;
+
         /// <summary>Start a new sweep from the radar's scan point (true or known position).</summary>
         private static void TakeProfile(Profile p, GlobalPosition origin)
         {
             p.NextOrigin = origin;
-            p.NextRange = p.Radar.GetRadarRange();
+            p.NextRange = SweepRange(p.Radar);
             p.NextAlt = p.NextOrigin.ToLocalPosition().y - Datum.LocalSeaY;
             p.RaysDone = 0;
         }
@@ -420,6 +466,11 @@ namespace AutopilotMod
         private int Advance(Profile p, int budget)
         {
             if (p.RaysDone >= Az) return 0;
+            if (p.NextHeight == null)
+            {
+                p.NextHeight = Rent();
+                p.NextBefore = Rent();
+            }
             float step = p.NextRange / Steps;
             int fine = Mathf.Clamp(Mathf.CeilToInt(step / grid.Cell), 1, 32);
             float sub = step / fine, ox = p.NextOrigin.x, oz = p.NextOrigin.z, alt = p.NextAlt;
@@ -444,39 +495,71 @@ namespace AutopilotMod
             }
             if (p.RaysDone >= Az)
             {
-                (p.Height, p.NextHeight) = (p.NextHeight, p.Height);
-                (p.Before, p.NextBefore) = (p.NextBefore, p.Before);
+                if (p.Height != null)
+                {
+                    spare.Push(p.Height);
+                    spare.Push(p.Before);
+                }
+                p.Height = p.NextHeight;
+                p.Before = p.NextBefore;
+                p.NextHeight = p.NextBefore = null;
                 p.Origin = p.NextOrigin;
                 p.Range = p.NextRange;
                 p.Alt = p.NextAlt;
                 p.Valid = true;
-                p.VisAgl = -1f;
+                p.VisAgl = float.NaN;
                 dirty = true;
             }
             return used;
         }
 
         /// <summary>
-        /// Line-of-sight along each bearing: a target at terrain + agl at the far edge of bin i is
-        /// visible when its elevation angle from the radar clears the steepest terrain before it
-        /// (earlier bins, plus samples inside bin i) and is above the radar horizon. vis: 1 = masked, 2 = visible.
+        /// Target height above sea level over terrain t: terrain + agl, or (tgtAsl not NaN) a fixed
+        /// altitude such as the own jet's, kept MinAgl above the ground.
         /// </summary>
-        internal static void Viewshed(float[] height, float[] before, float radarAlt, float agl, float step, byte[] vis)
+        private static float TargetAsl(float t, float agl, float tgtAsl) =>
+            float.IsNaN(tgtAsl) ? t + agl : Mathf.Max(tgtAsl, t + MinAgl);
+
+        /// <summary>
+        /// Line-of-sight along each bearing: a target at TargetAsl at the far edge of bin i is
+        /// visible when its elevation angle from the radar clears the steepest terrain before it
+        /// (earlier bins, plus samples inside bin i), it is above the radar horizon, and its signal
+        /// beats the radar's minimum after clutter. vis: 0 = signal too weak, 1 = hidden, 2 = detected.
+        /// Mirrors DetectorManager.RequestRadarCheck + RadarParams.GetSignalStrength with no ECM, where
+        /// the doppler boost only applies once the signal already passes, so it can't change the result.
+        /// </summary>
+        internal static void Viewshed(float[] height, float[] before, float radarAlt, float agl, float tgtAsl, float step,
+            RadarParams rp, float rcs, float tgtRadius, byte[] vis)
         {
-            // The map is flat, but the game (DetectorManager.RequestRadarCheck) drops targets past the
-            // curved-earth horizon: sqrt(2R*radarASL) + sqrt(2R*targetASL) < horizontal distance.
+            // The map is flat, but the game drops targets past the curved-earth horizon:
+            // sqrt(2R*radarASL) + sqrt(2R*targetASL) < horizontal distance.
             const float TwoR = 12742000f;
             float radarHorizon = Mathf.Sqrt(TwoR * Mathf.Max(0f, radarAlt));
+            float rcsGain = Mathf.Pow(rcs, 0.25f), maxDist = rp.maxRange * 2f;
+            float size2 = tgtRadius * tgtRadius * 2f;
             for (int a = 0; a < Az; a++)
             {
                 int b = a * Steps;
                 float maxSlope = float.NegativeInfinity;
                 for (int i = 0; i < Steps; i++)
                 {
-                    float d = (i + 1) * step, t = height[b + i];
+                    float d = (i + 1) * step, t = height[b + i], tgt = TargetAsl(t, agl, tgtAsl), dy = tgt - radarAlt;
+                    float h = tgt - t; // target's radar altitude
                     maxSlope = Mathf.Max(maxSlope, before[b + i]);
-                    bool aboveHorizon = radarHorizon + Mathf.Sqrt(TwoR * Mathf.Max(0f, t + agl)) >= d;
-                    vis[b + i] = aboveHorizon && (t + agl - radarAlt) / d >= maxSlope ? (byte)2 : (byte)1;
+                    float dist = Mathf.Sqrt(d * d + dy * dy);
+                    float signal = Mathf.Min(rp.maxRange / dist * rcsGain, rp.maxSignal);
+                    byte v;
+                    if (signal < rp.minSignal || dist > maxDist) v = 0;
+                    else if (dy / d < maxSlope || radarHorizon + Mathf.Sqrt(TwoR * Mathf.Max(0f, tgt)) < d) v = 1;
+                    else
+                    {
+                        // below the radar's line to its horizon, the ground behind the target adds clutter
+                        float clutter = size2 / (h * h); // the ground right under the target
+                        if (d < radarHorizon && tgt < radarAlt * (1f - d / radarHorizon))
+                            clutter += Mathf.Min(dist, 1000f) * (radarAlt - tgt) / (dist * h);
+                        v = signal - clutter * rp.clutterFactor >= rp.minSignal ? (byte)2 : (byte)1;
+                    }
+                    vis[b + i] = v;
                     maxSlope = Mathf.Max(maxSlope, (t - radarAlt) / d);
                 }
             }
@@ -535,13 +618,17 @@ namespace AutopilotMod
             Transform scan = p.Radar != null ? p.Radar.GetScanPoint() : null;
             int resume = buildRow;
             buildRow = -1;
-            if (scan == null) return 0;
+            if (scan == null || !(p.Radar is Radar radar)) return 0;
             float half = Tex * 0.5f, mPerPx = bR / half, agl = cfg.RadarTargetAgl.Value;
             float radarAlt = p.Alt;
+            // target: own jet's size (ground clutter) and the RCS set for this view; TGT ALT (agl < 0)
+            // = own altitude above sea level, as snapped in Tick
+            float rcs = TargetRcs(), tgtRadius = me.maxRadius;
+            float tgtAsl = agl < 0f ? altSnap : float.NaN, hKey = agl < 0f ? -1f - altSnap : agl;
 
             // Scan cone (half-angle, 0 = all round) is checked in 3D, so it also covers the
-            // radar's up/down limits for a target at that spot's terrain + agl.
-            float cone = p.Radar is Radar rr ? RadarConeRef(rr) : 0f;
+            // radar's up/down limits for a target at that spot's height.
+            float cone = RadarConeRef(radar);
             Vector3 fwd = scan.forward;
             bool flat = false, elevOnly = false; // flat = azimuth-only check; elevOnly = pitch band, any azimuth
             if (bEnemy)
@@ -561,12 +648,16 @@ namespace AutopilotMod
             int x0 = Mathf.Max(0, (int)(ox - rp)), x1 = Mathf.Min(Tex - 1, (int)(ox + rp));
             int y0 = Mathf.Max(0, (int)(oy - rp)), y1 = Mathf.Min(Tex - 1, (int)(oy + rp));
             if (x1 < x0 || y1 < y0) return 0;
-            if (p.VisAgl != agl) // only for radars in view: it isn't counted against the pixel budget
+            int used = 0;
+            if (p.VisAgl != hKey || p.VisRcs != rcs || p.VisRadius != tgtRadius) // only for radars in view
             {
-                Viewshed(p.Height, p.Before, radarAlt, agl, p.Range / Steps, p.Vis);
-                p.VisAgl = agl;
+                used = ViewshedCost;
+                Viewshed(p.Height, p.Before, radarAlt, agl, tgtAsl, p.Range / Steps, radar.RadarParameters, rcs, tgtRadius, p.Vis);
+                p.VisAgl = hKey;
+                p.VisRcs = rcs;
+                p.VisRadius = tgtRadius;
             }
-            int y = Mathf.Max(y0, resume), used = 0;
+            int y = Mathf.Max(y0, resume);
             float binsPerM = Steps / p.Range, azPerRad = Az / (2f * Mathf.PI), r2 = p.Range * p.Range;
             for (; y <= y1 && used < budget; y++, used += x1 - x0 + 1)
             {
@@ -582,7 +673,7 @@ namespace AutopilotMod
                     int bin = Mathf.Min(Az - 1, (int)(brg * azPerRad)) * Steps + Mathf.Min(Steps - 1, (int)(Mathf.Sqrt(d2) * binsPerM));
                     if (cone > 0f)
                     {
-                        float dy = p.Height[bin] + agl - radarAlt;
+                        float dy = TargetAsl(p.Height[bin], agl, tgtAsl) - radarAlt;
                         if (elevOnly ? Mathf.Abs(Mathf.Atan2(dy, Mathf.Sqrt(d2)) * Mathf.Rad2Deg - p.ConePitch) > cone
                             : Vector3.Angle(new Vector3(dx, flat ? 0f : dy, dz), fwd) > cone) continue;
                     }
@@ -727,7 +818,7 @@ namespace AutopilotMod
             // bottom status line: what is shown + colour key
             Fill(Sc(0f, 0.92f, 1f, 0.08f), LegendBack, 0f);
             bool noRadar = Current == Mode.Own && ownRadarMissing;
-            bool ownJammed = !noRadar && profiles.TryGetValue(me.radar, out Profile op) && op.Jammed;
+            bool ownJammed = !noRadar && me.radar != null && profiles.TryGetValue(me.radar, out Profile op) && op.Jammed;
             string status = grid != null && !grid.Ready ? $"MAPPING TERRAIN {grid.Progress * 100f:F0}%"
                 : mapSettings == null ? "NO MAP"
                 : Current == Mode.Own
@@ -737,7 +828,7 @@ namespace AutopilotMod
             Color green = new Color(0.35f, 0.95f, 0.45f), red = new Color(1f, 0.3f, 0.25f);
             bool en = Current == Mode.Enemy;
             Text(Sc(0.5f, 0.92f, 0.48f, 0.08f), "SEEN", 0.026f, en ? red : green, TextAnchor.MiddleLeft);
-            Text(Sc(0.66f, 0.92f, 0.32f, 0.08f), "TERRAIN", 0.026f, en ? green : red, TextAnchor.MiddleRight);
+            Text(Sc(0.66f, 0.92f, 0.32f, 0.08f), "HIDDEN", 0.026f, en ? green : red, TextAnchor.MiddleRight);
         }
 
         /// <summary>Global x/z -> position inside the screen rect (0,0 = its top-left).</summary>
@@ -798,9 +889,14 @@ namespace AutopilotMod
                     case ApCommand.RdrAll: label = "ALL"; boxed = Current == Mode.All; break;
                     case ApCommand.RdrOwn: label = "OWN"; boxed = Current == Mode.Own; break;
                     case ApCommand.RdrEnemy: label = "ENMY"; boxed = Current == Mode.Enemy; break;
-                    case ApCommand.RdrTgt: label = $"TGT {cfg.RadarTargetAgl.Value:F0}"; break;
+                    case ApCommand.RdrTgt: label = cfg.RadarTargetAgl.Value < 0f ? "TGT ALT" : $"TGT {cfg.RadarTargetAgl.Value:F0}"; break;
                     case ApCommand.RdrHide: label = "HIDE"; break;
                     case ApCommand.RdrFollow: label = "FOLW"; boxed = follow; break;
+                    case ApCommand.RdrRcsOwn:
+                        // the RCS this view is drawn for (boxed = own jet's live RCS)
+                        label = $"RCS\n{TargetRcs():0.###}";
+                        boxed = RcsSetting.Value <= 0f;
+                        break;
                     default: label = "MAP"; break;
                 }
                 Legend(r, label, anchor, boxed, false, lit);

@@ -108,7 +108,6 @@ namespace AutopilotMod
         // =====================================================================
         private void Update()
         {
-            mirror.Update();
             Aircraft local = GameManager.GetLocalAircraft(out Aircraft a) ? a : null;
             if (local != aircraft)
             {
@@ -130,6 +129,8 @@ namespace AutopilotMod
                 return;
             }
 
+            // Started here, not in the menus, so its "WEB MFD http://..." message lands on a visible MFD.
+            mirror.Update();
             UpdateHold();
             radarPage.Tick(aircraft, radarPage.Visible || mirror.Watching(1));
 
@@ -275,6 +276,9 @@ namespace AutopilotMod
                 case ApCommand.RdrFollow:
                 case ApCommand.RdrMap:
                 case ApCommand.RdrEnemy:
+                case ApCommand.RdrRcsUp:
+                case ApCommand.RdrRcsDown:
+                case ApCommand.RdrRcsOwn:
                     radarPage.Command(cmd);
                     break;
                 case ApCommand.Hide:

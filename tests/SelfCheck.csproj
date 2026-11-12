@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Checks the autopilot's pure arithmetic (src/ApMath.cs) without the game. From this folder: dotnet run -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="SelfCheck.cs" />
+    <Compile Include="..\src\ApMath.cs" />
+  </ItemGroup>
+
+</Project>

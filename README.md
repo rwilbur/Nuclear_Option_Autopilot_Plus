@@ -29,10 +29,13 @@ no ViGEmBus.
 ## Second screen (web mirror)
 
 Both MFDs can be mirrored to a browser on another computer on your network, and you can click,
-drag and scroll them there just like in-game.
+drag and scroll them there just like in-game. One difference: holding an arrow on the web page
+does not repeat, so each tap is one step (use STEP for 10x steps).
 
 1. In `BepInEx\config\com.yourname.autopilotmod.cfg`, set `[WebMirror] Enabled = true`.
-2. Start the game. The A/P MFD shows `WEB MFD http://<ip>:8080` when the server starts, and the
+2. Start the game and get in a cockpit: the server starts the first time you fly. The A/P MFD
+   then shows `WEB MFD http://<ip>:8080` (or `WEB MFD OFF - PORT 8080 BUSY` if another program
+   has the port; pick another `Port` and set `Enabled = true` again), and the
    address is also in `BepInEx\LogOutput.log`. Allow the game through Windows Firewall on private
    networks when asked.
 3. On the second computer, open that address.
@@ -64,7 +67,7 @@ to 60) and `JpegQuality`. Frames are streamed (MJPEG) and encoded off the main t
 | **F8**          | `AutothrottleEngage`   | Autothrottle engage / disconnect (holds current speed). |
 | **F6**          | `ShowHideMfd`          | Show / hide the MFD. |
 | **F7**          | `MfdCursor`            | MFD cursor on/off, so you can click the push-buttons. Drag the bezel to move an MFD; drag the grip in its bottom-right corner to resize it. |
-| **F9**          | `RadarCoveragePage`    | Radar coverage MFD over the game map: off → **ALL** friendly radars → **OWN** radar only → **ENEMY** radars at known positions → off. Green = seen, red = in range but hidden by terrain, for a target at the **TGT** height above ground. With the F7 cursor: scroll to zoom, drag to pan, **MAP** shows the whole map, **FOLW** re-centres on your jet. Enemy units the game map shows (with its target filters applied) are drawn with their map icons and heading; click one to select it as a target, click again to deselect. |
+| **F9**          | `RadarCoveragePage`    | Radar coverage MFD over the game map: off → **ALL** friendly radars → **OWN** radar only → **ENEMY** radars at known positions → off. Green = the game would detect a target at the **TGT** height above ground there (**TGT ALT** = at your own current altitude); red = strong enough signal but hidden by terrain, the earth's curvature (radar horizon) or ground clutter; no colour = signal too weak. Each view has its own target RCS (ALL/OWN default 1, ENEMY defaults to your jet's current RCS), set with the **RCS** arrows (middle button = your own jet's RCS) or typed into the web mirror. With the F7 cursor: scroll to zoom, drag to pan, **MAP** shows the whole map, **FOLW** re-centres on your jet. Enemy units the game map shows (with its target filters applied) are drawn with their map icons and heading; click one to select it as a target, click again to deselect. |
 | **PgUp / PgDn** | `VerticalTargetUp` / `VerticalTargetDown` | Vertical target up/down (altitude, radar altitude, or V/S, depending on mode). |
 | **] / [**       | `HeadingRight` / `HeadingLeft` | Heading bug right/left (bank target in ATT mode). |
 | **= / -**       | `SpeedUp` / `SpeedDown` | Speed target up/down. |
@@ -96,7 +99,11 @@ the game doesn't already use.
   standard-rate turn. **ATT** holds a bank angle; below 7° of bank it snaps to wings-level.
 - Vertical: **BALT** holds barometric altitude. **RALT** holds radar altitude, for low-level
   and sea-skimming flight. **V/S** holds a vertical speed.
+  Altitude and radar-altitude targets can't be set below 1 m.
 - **A/T** is independent of the A/P, as in real jets. It holds speed with the throttle.
+- **Heavy jets.** On airframes whose fly-by-wire allows little pitch or roll rate (the heavy
+  bomber class), the flight-path and bank loops automatically use lower gains and a lower roll
+  rate, so they don't outrun the airframe and oscillate.
 - Pressing an already-selected mode, or the target readout beside a rocker, re-syncs that
   target to the current value. **SYNC** re-syncs everything.
 
@@ -165,6 +172,10 @@ which is rate-command, and it also moves the collective and the pedals.
   pedals keeping the ball centred.
 - **Height.** BALT/RALT/V-S as on jets, but climb and descent are limited to 8 m/s in helicopter
   mode. Sink is limited to 3 m/s at low speed to stay out of vortex ring state.
+- **Near the ground.** The collective is also adjusted for rotor tilt (pitching or banking takes
+  lift away). Within about 15 m of the floor, the speed hold stops tilting the rotor further
+  while the aircraft is sinking below its commanded climb rate, and the sink rate toward the
+  floor is limited to 0.3 m/s per metre of clearance.
 - **Rotor RPM protection** (Chicane, Ibis). The game's engine governor gives at most 110% power,
   so a big collective demand can drag the rotor down. Below 97% rotor RPM the A/P stops raising
   the collective and backs it off until the rotor recovers, like a real Nr/power limiter. The
@@ -261,3 +272,6 @@ and the raw stick outputs.
   target-list panel).
 - `src/SoundBank.cs`: loads the optional custom warning sounds.
 - `src/Units.cs`, `src/ApCommand.cs`, `src/DisconnectTone.cs`: helpers.
+- `src/ApMath.cs`: the control laws' pure arithmetic (no Unity or game types).
+- `tests/`: self-check of `ApMath.cs` plus a small offline model of the helicopter height loop.
+  Run it with `dotnet run --project tests`; it needs no game files.

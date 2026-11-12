@@ -25,7 +25,6 @@ namespace AutopilotMod
         private readonly SoundBank bank;
 
         public bool Active { get; private set; }
-        public float TimeToImpact { get; private set; }
 
         private float lastThreat = -10f, lastCall = -10f, callInterval = 1.8f;
         private int callsThisEvent;
@@ -109,7 +108,6 @@ namespace AutopilotMod
             if (ac.gearDeployed && !cfg.GpwsWithGearDown.Value && sinBeta < Mathf.Sin(8f * Mathf.Deg2Rad))
                 return false;                             // normal approach / landing
 
-            TimeToImpact = dist / speed;
             float cosBeta = Mathf.Sqrt(Mathf.Max(0f, 1f - sinBeta * sinBeta));
             float rollOut = Mathf.Abs(bankDeg) / RollOutRate;
             float needed = speed * (react + rollOut) * sinBeta + radius * (1f - cosBeta);

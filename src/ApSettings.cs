@@ -71,6 +71,7 @@ namespace AutopilotMod
         public ConfigEntry<float> RadarX;
         public ConfigEntry<float> RadarY;
         public ConfigEntry<float> RadarTargetAgl;
+        public ConfigEntry<float> RadarEnemyRcs, RadarFriendlyRcs;
 
         // ---- web mirror ----
         public ConfigEntry<bool> MirrorEnabled;
@@ -151,7 +152,9 @@ namespace AutopilotMod
             RadarSize = cfg.Bind(D, "RadarPageSize", 0.40f, "Radar-coverage display size as a fraction of screen height.");
             RadarX = cfg.Bind(D, "RadarPagePositionX", 0.015f, "Radar-coverage display horizontal position (0 = left edge, 1 = right edge).");
             RadarY = cfg.Bind(D, "RadarPagePositionY", 0.97f, "Radar-coverage display vertical position (0 = top, 1 = bottom).");
-            RadarTargetAgl = cfg.Bind(D, "RadarTargetHeight", 150f, "Height above the ground (m) of the target the coverage map is drawn for: 5, 30, 150, 500 or 2000. The TGT button cycles it.");
+            RadarTargetAgl = cfg.Bind(D, "RadarTargetHeight", 150f, "Height above the ground (m) of the target the coverage map is drawn for: 5, 30, 150, 500 or 2000, or -1 = ALT: your own altitude above sea level. The TGT button cycles it.");
+            RadarEnemyRcs = cfg.Bind(D, "RadarEnemyRcs", 0f, new ConfigDescription("Radar cross section the ENMY coverage map is drawn for. 0 = your own aircraft's current RCS (it grows with external stores). The RCS buttons and the web mirror set it.", new AcceptableValueRange<float>(0f, 1000f)));
+            RadarFriendlyRcs = cfg.Bind(D, "RadarFriendlyRcs", 1f, new ConfigDescription("Radar cross section the ALL/OWN coverage maps are drawn for (e.g. a stealthy enemy's). 0 = your own aircraft's current RCS. The RCS buttons and the web mirror set it.", new AcceptableValueRange<float>(0f, 1000f)));
             ShowDebug = cfg.Bind(D, "ShowDebugLine", false, "Show commanded vs actual rates and raw stick outputs on the MFD (useful when tuning).");
 
             const string M = "WebMirror";

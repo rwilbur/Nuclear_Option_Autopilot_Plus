@@ -77,6 +77,10 @@ namespace AutopilotMod
         private float playerThrottle = float.NaN, playerThrottleAtEngage = float.NaN;
         private bool suppressStickOverride;
         private float pilotPitch, pilotRoll;   // raw stick from the latest tick, before the A/P overrides it
+        // Outer-loop gain factors for sluggish airframes (1 = fighter). The heavy jets' fly-by-wire allows
+        // 0.3 rad/s of pitch rate and 3 rad/s of roll rate where the fighters get 0.7-1 and 5-12; the
+        // gains tuned on fighters outrun them and they oscillate.
+        private float pitchAgility = 1f, rollAgility = 1f;
 
         // ---- FBW internals (private serialized fields on ControlsFilter.FlyByWire) ----
         private static readonly AccessTools.FieldRef<ControlsFilter.FlyByWire, float> FbwGLimit = TryRef("gLimitPositive");
@@ -293,8 +297,8 @@ namespace AutopilotMod
         public void SyncVertical()
         {
             if (!State.Valid) return;
-            TgtAltitude = State.Altitude;
-            TgtRadarAlt = Mathf.Max(State.RadarAlt, cfg.GroundFloor.Value + 2f);
+            TgtAltitude = Mathf.Max(State.Altitude, ApMath.MinAltitudeTarget);
+            TgtRadarAlt = Mathf.Max(State.RadarAlt, cfg.GroundFloor.Value + 2f, ApMath.MinAltitudeTarget);
             raltFiltered = State.RadarAlt;
             // V/S captures the current rate rounded to the display step
             float step = Units.VsStep(false);
@@ -320,12 +324,12 @@ namespace AutopilotMod
             if (Lateral == LateralMode.Hdg)
             {
                 float step = coarse ? 10f : 1f;
-                TgtHeading = Mathf.Repeat(Snap(TgtHeading, dir, step), 360f);
+                TgtHeading = Mathf.Repeat(ApMath.Snap(TgtHeading, dir, step), 360f);
             }
             else
             {
                 float step = coarse ? 5f : 1f;
-                TgtBank = Mathf.Clamp(Snap(TgtBank, dir, step), -cfg.MaxBank.Value, cfg.MaxBank.Value);
+                TgtBank = Mathf.Clamp(ApMath.Snap(TgtBank, dir, step), -cfg.MaxBank.Value, cfg.MaxBank.Value);
             }
         }
 
@@ -335,14 +339,14 @@ namespace AutopilotMod
             switch (Vertical)
             {
                 case VerticalMode.Balt:
-                    TgtAltitude = Snap(TgtAltitude, dir, Units.AltStep(coarse));
+                    TgtAltitude = Mathf.Max(ApMath.MinAltitudeTarget, ApMath.Snap(TgtAltitude, dir, Units.AltStep(coarse)));
                     break;
                 case VerticalMode.Ralt:
-                    TgtRadarAlt = Mathf.Max(cfg.GroundFloor.Value, Snap(TgtRadarAlt, dir, Units.RaltStep(coarse)));
+                    TgtRadarAlt = Mathf.Max(cfg.GroundFloor.Value, ApMath.MinAltitudeTarget, ApMath.Snap(TgtRadarAlt, dir, Units.RaltStep(coarse)));
                     break;
                 default:
                     float lim = cfg.MaxClimbRate.Value;
-                    TgtVs = Mathf.Clamp(Snap(TgtVs, dir, Units.VsStep(coarse)), -lim, lim);
+                    TgtVs = Mathf.Clamp(ApMath.Snap(TgtVs, dir, Units.VsStep(coarse)), -lim, lim);
                     break;
             }
         }
@@ -350,15 +354,7 @@ namespace AutopilotMod
         public void NudgeSpeed(int dir, bool coarse)
         {
             coarse |= CoarseStep;
-            TgtSpeed = Mathf.Max(Rotorcraft ? 0f : cfg.MinEngageSpeed.Value, Snap(TgtSpeed, dir, Units.SpeedStep(coarse)));
-        }
-
-        /// <summary>Step to the next multiple of <paramref name="step"/> in the given direction.</summary>
-        private static float Snap(float value, int dir, float step)
-        {
-            float n = value / step;
-            float snapped = dir > 0 ? Mathf.Floor(n + 1e-3f) + 1f : Mathf.Ceil(n - 1e-3f) - 1f;
-            return snapped * step;
+            TgtSpeed = Mathf.Max(Rotorcraft ? 0f : cfg.MinEngageSpeed.Value, ApMath.Snap(TgtSpeed, dir, Units.SpeedStep(coarse)));
         }
 
         // =====================================================================
@@ -403,6 +399,8 @@ namespace AutopilotMod
             {
                 ControlsFilter.FlyByWire fbw = GetFbw(ac);
                 HasFbw = fbw != null;
+                pitchAgility = fbw != null ? ApMath.Agility(FbwMaxPitchRate(fbw), 0.7f, 0.4f) : 1f;
+                rollAgility = fbw != null ? ApMath.Agility(FbwMaxRollRate(fbw), 5f, 0.5f) : 1f;
                 FlyVertical(fbw, dt);
                 FlyLateral(fbw, dt);
                 inputs.pitch = OutPitch;
@@ -485,8 +483,8 @@ namespace AutopilotMod
             float vsCmd;
             switch (Vertical)
             {
-                case VerticalMode.Balt: vsCmd = CaptureProfile(TgtAltitude - s.Altitude, k, a, maxVs); break;
-                case VerticalMode.Ralt: vsCmd = CaptureProfile(TgtRadarAlt - raltFiltered, k, a, maxVs); break;
+                case VerticalMode.Balt: vsCmd = ApMath.CaptureProfile(TgtAltitude - s.Altitude, k, a, maxVs); break;
+                case VerticalMode.Ralt: vsCmd = ApMath.CaptureProfile(TgtRadarAlt - raltFiltered, k, a, maxVs); break;
                 default: vsCmd = Mathf.Clamp(TgtVs, -maxVs, maxVs); break;
             }
 
@@ -517,7 +515,7 @@ namespace AutopilotMod
                 gammaRate += ((gamma - gammaPrev) / dt - gammaRate) * (dt / (0.2f + dt));
             gammaPrev = gamma;
 
-            float qCmd = cfg.FlightPathGain.Value * sched * (gammaCmdSlewed - gamma)
+            float qCmd = cfg.FlightPathGain.Value * sched * pitchAgility * (gammaCmdSlewed - gamma)
                          - cfg.FlightPathDamping.Value * gammaRate + turnFf;
             qCmd = Mathf.Clamp(qCmd, -cfg.MaxPushG.Value * G / v, cfg.MaxPullG.Value * G / v + turnFf);
             CmdQ = qCmd;
@@ -534,20 +532,6 @@ namespace AutopilotMod
             stickUp = Mathf.Clamp((qCmd + cfg.PitchRateGain.Value * qErr) / qPerStick + qI, -1f, 1f);
 
             OutPitch = -stickUp;   // ControlInputs.pitch is + nose-down
-        }
-
-        /// <summary>
-        /// Climb-rate command for an altitude error. Linear (gain k) near the target; further out a
-        /// square-root profile, i.e. the rate from which a constant vertical deceleration <paramref name="a"/>
-        /// stops exactly on the target. Big changes go at full rate and only round out at the end,
-        /// instead of creeping in exponentially.
-        /// </summary>
-        private static float CaptureProfile(float err, float k, float a, float maxVs)
-        {
-            float e0 = 2f * a / (k * k);   // where the linear and sqrt segments meet
-            float abs = Mathf.Abs(err);
-            float vs = abs <= e0 ? k * abs : Mathf.Sqrt(2f * a * abs);
-            return Mathf.Sign(err) * Mathf.Min(vs, maxVs);
         }
 
         /// <summary>Body pitch rate (rad/s) the airframe produces per unit of stick.</summary>
@@ -600,11 +584,12 @@ namespace AutopilotMod
             else BankLimitedBySurface = false;
 
             bankCmd = Mathf.Clamp(bankCmd, -maxBank, maxBank);
-            bankCmdSlewed = Mathf.MoveTowards(bankCmdSlewed, bankCmd, 0.6f * cfg.MaxRollRate.Value * dt);
+            float maxRoll = cfg.MaxRollRate.Value * rollAgility;
+            bankCmdSlewed = Mathf.MoveTowards(bankCmdSlewed, bankCmd, 0.6f * maxRoll * dt);
             CmdBankDeg = bankCmdSlewed;
 
-            float maxP = cfg.MaxRollRate.Value * Mathf.Deg2Rad;
-            float pCmd = Mathf.Clamp(cfg.BankGain.Value * Mathf.DeltaAngle(s.Bank, bankCmdSlewed) * Mathf.Deg2Rad, -maxP, maxP);
+            float maxP = maxRoll * Mathf.Deg2Rad;
+            float pCmd = Mathf.Clamp(cfg.BankGain.Value * rollAgility * Mathf.DeltaAngle(s.Bank, bankCmdSlewed) * Mathf.Deg2Rad, -maxP, maxP);
             CmdP = pCmd;
 
             float pPerStick = RollRatePerStick(fbw, s);

@@ -29,7 +29,6 @@ namespace AutopilotMod
             source.clip = clip;
             source.playOnAwake = false;
             source.spatialBlend = 0f;
-            source.ignoreListenerPause = false;
         }
 
         /// <summary>Play the synthesised warble, or <paramref name="recording"/> instead when supplied.</summary>

@@ -29,6 +29,7 @@ namespace AutopilotMod
 
         private const float HoverSpeed = 12f, CruiseSpeed = 25f;   // m/s blend for heading/bank logic
         private const float RotorMaxVs = 8f, VrsMaxSink = 3f;        // VRSThreshold is 4 m/s in the game
+        private const float RotorCaptureAccel = 1f;                  // m/s^2 round-out a collective can follow
         // Rotor speed floor and collective rate (1/s) per unit of Nr below/above it. The game's governor
         // asks for 110% power once Nr is 0.3% low, so healthy Nr sits near 1.0; under 0.97 the engine is
         // saturated and the rotor is being dragged down. At Nr 0.99 the normal 0.6/s rate is still allowed.
@@ -46,6 +47,7 @@ namespace AutopilotMod
 
         private float pitchCmdDeg, collective, pusher;
         private float prevFwd = float.NaN, prevVs = float.NaN, fwdAccel, vsAccel;
+        private float leanPrev = float.NaN;   // 1 / (cos pitch * cos bank) on the last tick
         private bool storedFlightAssist, flightAssistParked;
 
         private void BindRotorcraft(Aircraft ac)
@@ -74,6 +76,11 @@ namespace AutopilotMod
             gammaRate = 0f;
             raltFiltered = State.RadarAlt;
             playerThrottleAtEngage = playerThrottle;
+            // These are only kept up while engaged: start clean, or the first tick differentiates
+            // against the speeds from the last engagement and kicks the collective.
+            prevFwd = float.NaN;
+            fwdAccel = vsAccel = 0f;
+            leanPrev = float.NaN;
         }
 
         private void RotorDisengage(string reason)
@@ -140,20 +147,24 @@ namespace AutopilotMod
             // ---------------- vertical command ----------------
             raltFiltered += s.VerticalSpeed * dt + (s.RadarAlt - raltFiltered) * Mathf.Clamp01(2f * dt);
             float maxVs = Mathf.Lerp(RotorMaxVs, cfg.MaxClimbRate.Value, b);
-            float k = cfg.AltitudeGain.Value, a = cfg.AltitudeCaptureAccel.Value;
+            float k = cfg.AltitudeGain.Value;
+            float a = Mathf.Lerp(Mathf.Min(cfg.AltitudeCaptureAccel.Value, RotorCaptureAccel), cfg.AltitudeCaptureAccel.Value, b);
             float vsCmd;
             switch (Vertical)
             {
-                case VerticalMode.Balt: vsCmd = CaptureProfile(TgtAltitude - s.Altitude, k, a, maxVs); break;
-                case VerticalMode.Ralt: vsCmd = CaptureProfile(TgtRadarAlt - raltFiltered, k, a, maxVs); break;
+                case VerticalMode.Balt: vsCmd = ApMath.CaptureProfile(TgtAltitude - s.Altitude, k, a, maxVs); break;
+                case VerticalMode.Ralt: vsCmd = ApMath.CaptureProfile(TgtRadarAlt - raltFiltered, k, a, maxVs); break;
                 default: vsCmd = Mathf.Clamp(TgtVs, -maxVs, maxVs); break;
             }
             // Vortex-ring guard: no fast sink at low airspeed with the rotors in helicopter mode.
             float vrs = Mathf.Lerp(VrsMaxSink, maxVs, Mathf.Max(f, b));
             vsCmd = Mathf.Max(vsCmd, -vrs);
-            float floorVs = -(s.Clearance - cfg.GroundFloor.Value) * cfg.FloorGain.Value;
+            float floorVs = ApMath.RotorFloorVs(s.Clearance, cfg.GroundFloor.Value, cfg.FloorGain.Value, b);
             vsCmd = Mathf.Max(vsCmd, floorVs);
             CmdVs = vsCmd;
+            // Near the surface height comes first: while the aircraft is sinking below its commanded
+            // climb rate, the speed loop stops tilting the rotor further.
+            float heightFirst = ApMath.HeightPriority(vsCmd - s.VerticalSpeed, s.Clearance - cfg.GroundFloor.Value);
 
             // ---------------- speed command ----------------
             // Forward-acceleration demand from the speed error (hover hold when the target is 0).
@@ -164,7 +175,7 @@ namespace AutopilotMod
             // Pitch attitude: helicopter-mode speed loop. With Auto Wing Tilt on, the Tarantula's wing
             // add ~4.4 deg of thrust tilt per degree of body pitch in the hover, so soften the loop there.
             float attScale = tilt != null && ac.flightAssist ? 0.2f : 1f;
-            pitchCmdDeg -= (1f - b) * (1f - p) * 3f * attScale * axErr * dt;
+            pitchCmdDeg -= (1f - b) * (1f - p) * 3f * attScale * heightFirst * axErr * dt;
             // Compound cruise: fuselage level, the pusher does the speed work (X2/S-97 style).
             if (AtEngaged) pitchCmdDeg = Mathf.MoveTowards(pitchCmdDeg, 0f, p * 2f * dt);
             // Airplane mode: attitude follows the aircraft so a reconversion starts from where it is.
@@ -173,8 +184,12 @@ namespace AutopilotMod
             CmdGammaDeg = pitchCmdDeg;
 
             // ---------------- collective / power ----------------
-            float azErr = Mathf.Clamp(0.8f * (vsCmd - s.VerticalSpeed), -3f, 3f) - vsAccel;
-            float dColl = (1f - b) * 0.08f * azErr + b * 0.05f * axErr;
+            // Tilting the rotor (pitching to change speed, banking) takes lift away at once: scale the
+            // collective with 1 / (cos pitch * cos bank) instead of waiting for the sink to show up.
+            float lean = 1f / Mathf.Max(0.7f, Mathf.Cos(s.Pitch * Mathf.Deg2Rad) * Mathf.Cos(s.Bank * Mathf.Deg2Rad));
+            if (!float.IsNaN(leanPrev)) collective *= 1f + (1f - b) * (lean / leanPrev - 1f);
+            leanPrev = lean;
+            float dColl = (1f - b) * ApMath.CollectiveRate(vsCmd, s.VerticalSpeed, vsAccel) + b * 0.05f * axErr;
             dColl = NrLimitedRate(dColl);
             collective = Mathf.Clamp01(collective + Mathf.Clamp(dColl, -0.6f, 0.6f) * dt);
             OutThrottle = collective;

@@ -20,7 +20,7 @@ namespace AutopilotMod
     /// http://&lt;this PC&gt;:8080. Each MFD is drawn into a render texture, read back from the GPU
     /// without stalling, JPEG-encoded on a worker thread, and served by a tiny HTTP server. Clicks,
     /// drags and scrolls in the browser come back as mouse events on that MFD.
-    /// Pages are only rendered while a browser is polling them.
+    /// Pages are only rendered while a browser is streaming them.
     /// </summary>
     internal sealed class WebMirror : IDisposable
     {
@@ -30,7 +30,15 @@ namespace AutopilotMod
             public EventType Type;
             public Vector2 Pos01;
             public float Wheel;
+            public int At; // Environment.TickCount when it arrived
         }
+
+        // Browser input waits in the queues while the game is paused or nobody is flying; anything
+        // older than this is dropped instead of being replayed on resume.
+        private const int InputMaxAgeMs = 1000;
+        private const int MaxRequestLine = 2000;
+
+        private static bool Stale(int at) => unchecked(Environment.TickCount - at) > InputMaxAgeMs;
 
         private readonly ApSettings cfg;
         private readonly ManualLogSource log;
@@ -56,7 +64,7 @@ namespace AutopilotMod
         private readonly int[] busy;       // 1 while a readback/encode is in flight
         private readonly int[] lastPoll;   // Environment.TickCount of the last browser request
         private readonly ConcurrentQueue<Remote> input = new ConcurrentQueue<Remote>();
-        private readonly ConcurrentQueue<string[]> targetActions = new ConcurrentQueue<string[]>(); // {action, arg}
+        private readonly ConcurrentQueue<(string act, string arg, int at)> targetActions = new ConcurrentQueue<(string act, string arg, int at)>();
         private volatile string targetsJson = "{\"filters\":[],\"selected\":[]}";
         private int lastTargetsPoll = Environment.TickCount - 60000;
         private float nextTargets;
@@ -115,10 +123,17 @@ namespace AutopilotMod
         {
             if (!running) return;
             while (input.TryDequeue(out Remote r))
-                pages[r.Page].RemoteMouse(r.Type, r.Pos01 * Size(r.Page), r.Wheel, Size(r.Page), execute);
-            while (targetActions.TryDequeue(out string[] a))
+                if (!Stale(r.At)) pages[r.Page].RemoteMouse(r.Type, r.Pos01 * Size(r.Page), r.Wheel, Size(r.Page), execute);
+            while (targetActions.TryDequeue(out (string act, string arg, int at) a))
             {
-                TargetPanel.Apply(a[0], a[1]);
+                if (Stale(a.at)) continue;
+                if (a.act == "rcse" || a.act == "rcsf") // coverage-map RCS, enemy / friendly view; 0 = own jet's
+                {
+                    if (float.TryParse(a.arg, NumberStyles.Float, CultureInfo.InvariantCulture, out float v) && v >= 0f && v <= 1000f)
+                        (a.act == "rcse" ? cfg.RadarEnemyRcs : cfg.RadarFriendlyRcs).Value = v;
+                    continue;
+                }
+                TargetPanel.Apply(a.act, a.arg);
                 nextTargets = 0f; // show the result on the next poll
             }
             if (unchecked(Environment.TickCount - Volatile.Read(ref lastTargetsPoll)) < 3000 && Time.unscaledTime >= nextTargets)
@@ -245,6 +260,7 @@ namespace AutopilotMod
             catch (Exception ex)
             {
                 log.LogError($"Web MFD: can't listen on port {port}: {ex.Message}");
+                report($"WEB MFD OFF - PORT {port} BUSY", true);
                 cfg.MirrorEnabled.Value = false;
                 listener = null;
                 return;
@@ -300,8 +316,9 @@ namespace AutopilotMod
                 {
                     client.ReceiveTimeout = client.SendTimeout = 5000;
                     var reader = new StreamReader(ns, Encoding.ASCII);
-                    string[] request = (reader.ReadLine() ?? "").Split(' ');
-                    while (!string.IsNullOrEmpty(reader.ReadLine())) { } // skip headers
+                    string[] request = ReadLine(reader).Split(' ');
+                    for (int h = 0; ReadLine(reader).Length > 0; h++) // skip headers
+                        if (h > 100) throw new IOException("too many headers");
                     if (request.Length < 2 || request[0] != "GET")
                     {
                         Send(ns, "405 Method Not Allowed", "text/plain", Encoding.ASCII.GetBytes("GET only"));
@@ -318,23 +335,6 @@ namespace AutopilotMod
                         case "/":
                             Send(ns, "200 OK", "text/html; charset=utf-8", Encoding.UTF8.GetBytes(Html));
                             break;
-                        case "/frame":
-                            int page = PageArg(query);
-                            if (page < 0)
-                            {
-                                Send(ns, "400 Bad Request", "text/plain", Encoding.ASCII.GetBytes("bad page"));
-                                break;
-                            }
-                            Volatile.Write(ref lastPoll[page], Environment.TickCount);
-                            Frame one = Acquire(page);
-                            if (one == null)
-                            {
-                                Send(ns, "503 Service Unavailable", "text/plain", Encoding.ASCII.GetBytes("no frame yet (not flying?)"));
-                                break;
-                            }
-                            try { Send(ns, "200 OK", "image/jpeg", one.Data, one.Length); }
-                            finally { Release(one); }
-                            break;
                         case "/stream":
                             int sp = PageArg(query);
                             if (sp < 0) Send(ns, "400 Bad Request", "text/plain", Encoding.ASCII.GetBytes("bad page"));
@@ -346,8 +346,8 @@ namespace AutopilotMod
                             break;
                         case "/target":
                             string act = Arg(query, "a");
-                            bool known = act == "toggle" || act == "only" || act == "reset" || act == "clear" || act == "desel" || act == "sel";
-                            if (known && targetActions.Count < 64) targetActions.Enqueue(new[] { act, Arg(query, "i") ?? "" });
+                            bool known = act == "toggle" || act == "only" || act == "reset" || act == "clear" || act == "desel" || act == "sel" || act == "rcse" || act == "rcsf";
+                            if (known && targetActions.Count < 64) targetActions.Enqueue((act, Arg(query, "i") ?? "", Environment.TickCount));
                             Send(ns, known ? "204 No Content" : "400 Bad Request", "text/plain", new byte[0]);
                             break;
                         case "/input":
@@ -404,9 +404,21 @@ namespace AutopilotMod
 
         private static readonly byte[] Crlf = { 13, 10 };
 
-        private static void Send(Stream s, string status, string type, byte[] body, int length = -1)
+        /// <summary>One request line without its line ending ("" at end of stream); throws if it is too long.</summary>
+        private static string ReadLine(StreamReader reader)
         {
-            if (length < 0) length = body.Length;
+            var sb = new StringBuilder();
+            for (int c = reader.Read(); c >= 0 && c != '\n'; c = reader.Read())
+            {
+                if (sb.Length >= MaxRequestLine) throw new IOException("request line too long");
+                if (c != '\r') sb.Append((char)c);
+            }
+            return sb.ToString();
+        }
+
+        private static void Send(Stream s, string status, string type, byte[] body)
+        {
+            int length = body.Length;
             byte[] head = Encoding.ASCII.GetBytes(
                 $"HTTP/1.1 {status}\r\nContent-Type: {type}\r\nContent-Length: {length}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n");
             s.Write(head, 0, head.Length);
@@ -449,6 +461,7 @@ namespace AutopilotMod
                 Type = type,
                 Pos01 = new Vector2(Mathf.Clamp01(FloatArg(query, "x", 0.5f)), Mathf.Clamp01(FloatArg(query, "y", 0.5f))),
                 Wheel = Mathf.Clamp(FloatArg(query, "w", 0f), -1f, 1f),
+                At = Environment.TickCount,
             });
             return true;
         }
@@ -469,6 +482,7 @@ button{font:inherit;margin:1px;padding:3px 7px;min-height:28px;background:#111;c
 button.on{color:#5cff73;border-color:#5cff73}
 button.act{color:#ffbd33;border-color:#ffbd33}
 button.sel{color:#fff;border-color:#ff4a3d}
+input{font:inherit;width:9ch;margin:1px;padding:3px 5px;min-height:20px;background:#111;color:#5cff73;border:1px solid #333;border-radius:3px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:3px}
 .grid button{display:flex;align-items:center;gap:6px;width:100%;height:28px;margin:0;padding:0 6px;white-space:nowrap}
 .grid .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:left}
@@ -481,7 +495,9 @@ body.big #m1{--s:min(100vw,100vh)}
 </style></head><body>
 <button id=""ex"" title=""Expand / restore the map MFD (Esc restores)"">EXPAND MAP</button>
 <div id=""mfds""><img id=""m0"" alt=""A/P MFD""><img id=""m1"" alt=""Radar coverage MFD""></div>
-<div id=""tp""><div id=""flt""></div>
+<div id=""tp""><div class=""row""><span class=""gh"">MAP TARGET RCS: ALL/OWN &middot; ENMY (0 = OWN JET)</span><input id=""rcsf"" type=""number"" min=""0"" max=""1000"" step=""any"" value=""1""><button class=""act"" data-r=""rcsf"">SET</button><button class=""act"" data-r=""rcsf"" data-own>OWN</button>
+&nbsp;<input id=""rcse"" type=""number"" min=""0"" max=""1000"" step=""any"" value=""0""><button class=""act"" data-r=""rcse"">SET</button><button class=""act"" data-r=""rcse"" data-own>OWN</button></div>
+<div id=""flt""></div>
 <span class=""gh"">SELECTED</span><div id=""sel"" class=""grid""></div>
 <span class=""gh"">AVAILABLE (NEAREST FIRST)</span><div id=""con"" class=""grid""></div>
 <p class=""none"">Filter: tap = toggle, right-click / long-press = only that one. Target: tap = add / remove.</p></div>
@@ -527,6 +543,10 @@ function refresh() {
       : [none('no enemies shown on the map')]));
   }).catch(() => {});
 }
+// map target RCS boxes: rcsf = ALL/OWN, rcse = ENMY; Enter or SET sends, OWN = 0 (own jet's RCS)
+const setRcs = (id, own) => { const box = document.getElementById(id); if (own) box.value = 0; act(id, encodeURIComponent(box.value || 0)); };
+for (const b of document.querySelectorAll('button[data-r]')) b.onclick = () => setRcs(b.dataset.r, 'own' in b.dataset);
+for (const id of ['rcsf', 'rcse']) document.getElementById(id).onkeydown = e => { if (e.key === 'Enter') setRcs(id); };
 const ex = document.getElementById('ex');
 const loads = [], big = () => document.body.classList.contains('big');
 // while expanded the A/P image is hidden: drop its stream so the game stops rendering and encoding it
