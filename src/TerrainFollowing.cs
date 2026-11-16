@@ -7,11 +7,11 @@ namespace AutopilotMod
     /// RALT, but looks ahead along the predicted ground track and starts climbing early enough to
     /// cross rising terrain at that clearance - and level, so it doesn't balloon over the crest.
     ///
-    /// Look-ahead: a sweep of vertical raycasts (terrain, ships, sea level) at TfSamples points along
-    /// the track, bent by the turn the lateral mode is about to fly and zig-zagged across a corridor
+    /// Look-ahead: a sweep of vertical raycasts (terrain, ships, sea level) at TfSamples distances along
+    /// the track, bent by the turn the lateral mode is about to fly, three rays at each across a corridor
     /// wider than the wingspan. Vertical rays are the cheapest a terrain collider can answer, and the
     /// sweep only runs every TfSweepInterval (not every physics tick) and only while TF is flying
-    /// the jet: about 400 rays a second, no allocations. Between sweeps the samples are reused, shifted
+    /// the jet: about 1200 rays a second, no allocations. Between sweeps the samples are reused, shifted
     /// by the distance flown and height gained since. The arithmetic is in ApMath (TfSlope).
     /// </summary>
     internal sealed partial class FlightController
@@ -21,6 +21,7 @@ namespace AutopilotMod
         private const float TfMinLook = 1000f, TfMaxLook = 8000f;   // m
         private const float TfPlanShare = 0.75f;   // share of MaxFlightPathAngle the ride is planned with
         private const float TfLoopLag = 1f;        // s, flight-path loop response the look-ahead allows for
+        internal const float AirframeShare = 0.8f;  // share of the airframe's full-stick g the A/P uses, climb and turn together; the rest is for the rate loop
 
         /// <summary>Terrain ahead can't be cleared at the set clearance even at the maximum climb angle.</summary>
         public bool TfClimbLimited { get; private set; }
@@ -40,13 +41,13 @@ namespace AutopilotMod
         }
 
         /// <summary>Lowest clearance TF accepts as a target.</summary>
-        private float TfMinClearance => Mathf.Max(cfg.TfMinClearance.Value, cfg.GroundFloor.Value + 2f, ApMath.MinAltitudeTarget);
+        private float TfMinClearance => Mathf.Max(cfg.TfMinClearance.Value, ApMath.MinAltitudeTarget);
 
         /// <summary>
         /// Climb-rate command (m/s) for terrain following. <paramref name="aPull"/>/<paramref name="aPush"/>
-        /// are the ride's pull-up and push-over accelerations (m/s^2).
+        /// are the pull-up and push-over accelerations the ride is planned with (m/s^2).
         /// </summary>
-        private float TfClimbRate(Aircraft ac, float v, float k, float aPull, float aPush, float dt)
+        private float TfClimbRate(Aircraft ac, float v, float k, float aPull, float aPush, float lag, float dt)
         {
             FlightState s = State;
             float groundSpeed = Mathf.Sqrt(s.FwdSpeed * s.FwdSpeed + s.SideSpeed * s.SideSpeed);
@@ -61,13 +62,14 @@ namespace AutopilotMod
             float maxVs = v * Mathf.Sin(planGamma);
 
             // Under the aircraft: RALT's capture onto the set clearance, plus following a downslope.
-            float vsCmd = ApMath.CaptureProfile(TgtRadarAlt - raltFiltered, k, 0.5f * aPull, maxVs)
+            // Twice RALT's gain: at RALT's gain the last 100 m of a descent takes about 10 s, so TF rode high.
+            float vsCmd = ApMath.CaptureProfile(TgtRadarAlt - raltFiltered, 2f * k, 0.5f * aPull, maxVs)
                           + ApMath.TfDescentFeedforward(tfNearSlope, groundSpeed);
             vsCmd = Mathf.Clamp(vsCmd, -maxVs, maxVs);
 
             // Ahead: never below the flight path that clears every sample.
             float slope = ApMath.TfSlope(tfDist, tfRel, TfSamples, tfTravelled, s.Altitude - tfAltAtSweep, TgtRadarAlt,
-                v, s.Gamma * Mathf.Deg2Rad, planGamma, maxGamma, aPull, aPush, TfLoopLag, out bool limited);
+                v, s.Gamma * Mathf.Deg2Rad, planGamma, maxGamma, aPull, aPush, lag, out bool limited);
             TfClimbLimited = limited;
             if (!float.IsNegativeInfinity(slope))
                 vsCmd = Mathf.Max(vsCmd, v * Mathf.Sin(slope));
@@ -91,17 +93,18 @@ namespace AutopilotMod
             Vector3 right = new Vector3(track.z, 0f, -track.x);
             float vg = Mathf.Max(groundSpeed, 20f);
 
-            // The turn the lateral mode is about to fly (rad/s, + right) and where it ends (rad).
+            // The turn the lateral mode is about to fly (rad/s, + right) and where it ends (rad), at the rate
+            // the bank limits actually allow: a tighter predicted arc would scan ground the jet never flies over.
             float turnRate, turnLimit;
             if (Lateral == LateralMode.Hdg)
             {
-                float err = Mathf.DeltaAngle(s.Heading, TgtHeading);
-                turnRate = Mathf.Clamp(cfg.HeadingGain.Value * err, -cfg.MaxTurnRate.Value, cfg.MaxTurnRate.Value) * Mathf.Deg2Rad;
-                turnLimit = Mathf.Abs(err) * Mathf.Deg2Rad;
+                turnRate = HdgTurnRate(s, turnRateMax);
+                // NAV's L1 arc turns through twice the angle to its steering point; fly-over's hard turn only up to it
+                turnLimit = (Nav && !navHardTurn ? 2f : 1f) * Mathf.Abs(Mathf.DeltaAngle(s.Heading, TgtHeading)) * Mathf.Deg2Rad;
             }
             else
             {
-                turnRate = G * Mathf.Tan(Mathf.Clamp(TgtBank, -70f, 70f) * Mathf.Deg2Rad) / vg;
+                turnRate = G * Mathf.Tan(Mathf.Clamp(TgtBank, -bankLimit, bankLimit) * Mathf.Deg2Rad) / vg;
                 turnLimit = Mathf.PI;
             }
             bool turning = Mathf.Abs(turnRate) > 1e-3f;
@@ -129,16 +132,17 @@ namespace AutopilotMod
                     fwd = radius * sin + (d - arc) * cos;
                     side = radius * (1f - cos) + (d - arc) * sin;
                 }
-                // Left edge, centre, right edge of a corridor that widens with range (track uncertainty).
-                float offset = (i % 3 - 1) * (halfWidth + 0.05f * d);
-                fwd -= offset * sin;
-                side += offset * cos;
-
-                Vector3 p = pos + track * fwd + right * side;
-                p.y = top;
+                // Highest of the left edge, centre and right edge of a corridor that widens with range (track
+                // uncertainty). One ray per sample, alternating sides, missed peaked crests: it crossed them low.
                 float surfaceY = sea;
-                if (Physics.Raycast(p, Vector3.down, out RaycastHit hit, 10500f, mask, QueryTriggerInteraction.Ignore))
-                    surfaceY = Mathf.Max(hit.point.y, sea);
+                for (int lane = -1; lane <= 1; lane++)
+                {
+                    float offset = lane * (halfWidth + 0.05f * d);
+                    Vector3 p = pos + track * (fwd - offset * sin) + right * (side + offset * cos);
+                    p.y = top;
+                    if (Physics.Raycast(p, Vector3.down, out RaycastHit hit, 10500f, mask, QueryTriggerInteraction.Ignore))
+                        surfaceY = Mathf.Max(hit.point.y, surfaceY);
+                }
 
                 tfDist[i] = d;
                 tfRel[i] = surfaceY - gearY;

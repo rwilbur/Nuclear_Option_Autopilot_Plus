@@ -29,7 +29,7 @@ namespace AutopilotMod
         private DisconnectTone tone;
         private Harmony harmony;
 
-        private Aircraft aircraft;
+        private Aircraft aircraft, planned;
         private PilotPlayerState playerState;
         private float lastAxisTick = -10f;
         private bool cursorMode;
@@ -44,15 +44,17 @@ namespace AutopilotMod
         private void Awake()
         {
             Instance = this;
+            useGUILayout = false; // no GUILayout anywhere: skip the Layout pass of OnGUI every frame
             cfg = new ApSettings(Config);
             ap = new FlightController(cfg, Report);
-            mfd = new MfdPage(cfg, ap);
-            radarPage = new RadarCoveragePage(cfg);
-            mirror = new WebMirror(cfg, Logger, Report, mfd, radarPage);
             sounds = new SoundBank();
             StartCoroutine(sounds.LoadAll(Logger));
             tone = new DisconnectTone(gameObject);
             gpws = new TerrainWarning(cfg, gameObject, sounds, Logger);
+            mfd = new MfdPage(cfg, ap, gpws);
+            radarPage = new RadarCoveragePage(cfg, ap);
+            mirror = new WebMirror(cfg, Logger, Report, ap, mfd, radarPage);
+            FlightPlanner.Init(Logger, cfg);
             ap.ApDisconnected += () =>
             {
                 if (cfg.DisconnectTone.Value) tone.Play(sounds.Get(SoundBank.ApDisconnect));
@@ -82,17 +84,23 @@ namespace AutopilotMod
         {
             Aircraft ac = LocalAircraftOf(pps);
             if (ac == null) return;
+            long t = Perf.Now;
             playerState = pps;
             lastAxisTick = Time.time;
             ap.FixedTick(ac, pps, ac.GetInputs(), cursorMode);
-            gpws.Tick(ac, ap.State.Bank);
+            // TF deliberately flies close to the ground: no pull-up warning while it is flying
+            if (ap.ApEngaged && ap.Vertical == VerticalMode.Tf) gpws.Reset();
+            else gpws.Tick(ac, ap.State.Bank);
+            Perf.Add(Perf.Autopilot, t);
         }
 
         internal void OnPlayerThrottle(PilotPlayerState pps)
         {
             Aircraft ac = LocalAircraftOf(pps);
             if (ac == null) return;
+            long t = Perf.Now;
             ap.OnPlayerThrottle(ac, pps, ac.GetInputs());
+            Perf.Add(Perf.Autopilot, t);
         }
 
         private Aircraft LocalAircraftOf(PilotPlayerState pps)
@@ -108,6 +116,16 @@ namespace AutopilotMod
         // =====================================================================
         private void Update()
         {
+            Perf.Frame(Logger, cfg.ShowDebug.Value);
+            long t = Perf.Now;
+            UpdateMod();
+            Perf.Add(Perf.Update, t);
+        }
+
+        private void UpdateMod()
+        {
+            // the web page and flight planner are served in the menus too (plans can be sent before spawning)
+            mirror.Update(cmd => Execute(cmd, false));
             Aircraft local = GameManager.GetLocalAircraft(out Aircraft a) ? a : null;
             if (local != aircraft)
             {
@@ -129,10 +147,16 @@ namespace AutopilotMod
                 return;
             }
 
-            // Started here, not in the menus, so its "WEB MFD http://..." message lands on a visible MFD.
-            mirror.Update();
+            if (aircraft != planned) // each jet's fly-by-wire numbers, for the flight planner's predicted path
+            {
+                planned = aircraft;
+                if (FlightController.FbwNumbers(aircraft, out float gLimit, out float corner, out float roll))
+                    FlightPlanner.RecordAirframe(aircraft.definition.unitName, gLimit, corner, roll);
+            }
             UpdateHold();
+            long t = Perf.Now;
             radarPage.Tick(aircraft, radarPage.Visible || mirror.Watching(1));
+            Perf.Add(Perf.Radar, t);
 
             if (cursorMode && !cfg.MfdVisible.Value) SetCursorMode(false);
 
@@ -205,6 +229,8 @@ namespace AutopilotMod
                 case ApCommand.VertDown:
                 case ApCommand.SpdUp:
                 case ApCommand.SpdDown:
+                case ApCommand.SetValUp:
+                case ApCommand.SetValDown:
                     return true;
                 default:
                     return false;
@@ -252,8 +278,10 @@ namespace AutopilotMod
                 case ApCommand.AtToggle: ap.SetAutothrottle(aircraft, playerState, !ap.AtEngaged); break;
                 case ApCommand.ModeHdg: ap.SelectLateral(LateralMode.Hdg); break;
                 case ApCommand.ModeAtt: ap.SelectLateral(LateralMode.Att); break;
+                case ApCommand.ModeNav: ap.SelectNav(); break;
+                case ApCommand.WptClear: ap.ClearRoute(); break;
                 case ApCommand.ModeBalt: ap.SelectVertical(VerticalMode.Balt); break;
-                case ApCommand.ModeRalt: ap.SelectRaltOrTf(); break;
+                case ApCommand.ModeTf: ap.SelectTf(); break;
                 case ApCommand.ModeVs: ap.SelectVertical(VerticalMode.Vs); break;
                 case ApCommand.LatUp: ap.NudgeLateral(+1, coarse); break;
                 case ApCommand.LatDown: ap.NudgeLateral(-1, coarse); break;
@@ -267,6 +295,17 @@ namespace AutopilotMod
                 case ApCommand.SyncAll: ap.SyncAll(); break;
                 case ApCommand.StepToggle: ap.CoarseStep = !ap.CoarseStep; break;
                 case ApCommand.DataToggle: cfg.ShowDebug.Value = !cfg.ShowDebug.Value; break;
+                case ApCommand.SoundToggle: gpws.Muted = !gpws.Muted; break;
+                case ApCommand.SetPage: mfd.SettingsPage = !mfd.SettingsPage; break;
+                case ApCommand.NavTurnToggle: cfg.NavFlyOver.Value = !cfg.NavFlyOver.Value; break;
+                case ApCommand.SetPrev:
+                case ApCommand.SetNext:
+                case ApCommand.SetValUp:
+                case ApCommand.SetValDown:
+                case ApCommand.SetDefault:
+                case ApCommand.SetResetAll:
+                    mfd.SettingsCommand(cmd, coarse);
+                    break;
                 case ApCommand.RdrAll:
                 case ApCommand.RdrOwn:
                 case ApCommand.RdrTgt:
@@ -308,6 +347,13 @@ namespace AutopilotMod
         // =====================================================================
         private void OnGUI()
         {
+            long t = Perf.Now;
+            DrawGui();
+            Perf.Add(Perf.Gui, t);
+        }
+
+        private void DrawGui()
+        {
             if (!Flying) return;
             if (CursorManager.GetFlag(CursorFlags.GameMenu) || CursorManager.GetFlag(CursorFlags.Loading)) return;
             if (gpws.Active)
@@ -320,7 +366,9 @@ namespace AutopilotMod
                     else Execute(cmd, false);
                 });
             // after the in-game draws: the mirror re-lays out the pages for its own render textures
+            long t = Perf.Now;
             mirror.OnGUI(cmd => Execute(cmd, false));
+            Perf.Add(Perf.Mirror, t);
         }
     }
 }

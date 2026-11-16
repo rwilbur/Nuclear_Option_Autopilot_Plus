@@ -102,21 +102,23 @@ namespace AutopilotMod
         // Web mirror: draw into a render texture, take input from the browser
         // =====================================================================
         private bool mirror; // layout is the mirror's (frame at 0,0), not the game screen's
+        protected bool bare;  // mirror without the bezel: the display fills the whole image, any shape
 
-        private void MirrorLayout(float size)
+        private void MirrorLayout(float w, float h, bool bareLayout)
         {
             mirror = true;
-            S = size;
-            frame = new Rect(0f, 0f, size, size);
-            float m = Bezel * S;
-            screen = new Rect(m, m, size - 2f * m, size - 2f * m);
+            bare = bareLayout;
+            S = Mathf.Min(w, h);
+            frame = new Rect(0f, 0f, w, h);
+            float m = bare ? 0f : Bezel * S;
+            screen = new Rect(m, m, w - 2f * m, h - 2f * m);
         }
 
-        /// <summary>Draw the whole MFD into rt (square). Call from OnGUI during Repaint.</summary>
-        public void RenderMirror(RenderTexture rt)
+        /// <summary>Draw the MFD into rt (square), or bare: only its display, filling rt. Call from OnGUI during Repaint.</summary>
+        public void RenderMirror(RenderTexture rt, bool bareLayout)
         {
             EnsureResources();
-            MirrorLayout(rt.width);
+            MirrorLayout(rt.width, rt.height, bareLayout);
             RenderTexture prev = RenderTexture.active;
             Matrix4x4 savedGui = GUI.matrix;
             RenderTexture.active = rt;
@@ -126,7 +128,7 @@ namespace AutopilotMod
             GUI.matrix = Matrix4x4.identity;
             try
             {
-                DrawBezel(false);
+                if (!bare) DrawBezel(false);
                 DrawScreen();
             }
             finally
@@ -138,16 +140,17 @@ namespace AutopilotMod
         }
 
         /// <summary>A click/drag/scroll from the browser, at a position in mirror pixels.</summary>
-        public void RemoteMouse(EventType type, Vector2 pos, float wheel, float size, Action<ApCommand> execute)
+        public void RemoteMouse(EventType type, Vector2 pos, float wheel, int button, bool shift, Vector2 size, bool bareLayout, Action<ApCommand> execute)
         {
-            MirrorLayout(size);
-            var e = new Event { type = type, mousePosition = pos, button = 0, delta = new Vector2(0f, wheel) };
+            MirrorLayout(size.x, size.y, bareLayout);
+            var e = new Event { type = type, mousePosition = pos, button = button, delta = new Vector2(0f, wheel), modifiers = shift ? EventModifiers.Shift : EventModifiers.None };
             HandleMouse(e, execute);
         }
 
         protected void Layout()
         {
             mirror = false;
+            bare = false;
             S = resizing ? resizeS : Mathf.Clamp(sizeCfg.Value * Screen.height, MinSize, Screen.height * 0.9f);
             Vector2 pos = dragging || resizing
                 ? dragPos
@@ -175,7 +178,8 @@ namespace AutopilotMod
         protected bool HandleMouse(Event e, Action<ApCommand> execute)
         {
             Vector2 mp = e.mousePosition;
-            if (!dragging && !resizing && e.type != EventType.MouseDown && ScreenMouse(e))
+            // other buttons' presses go to the display too (right-click = waypoint on the map)
+            if (!dragging && !resizing && (e.type != EventType.MouseDown || (e.button != 0 && screen.Contains(mp))) && ScreenMouse(e))
                 return true;
             switch (e.type)
             {
@@ -200,7 +204,7 @@ namespace AutopilotMod
                     return true;
 
                 case EventType.MouseDown when e.button == 0 && frame.Contains(mp):
-                    foreach (Osb b in Buttons)
+                    foreach (Osb b in bare ? Array.Empty<Osb>() : Buttons)
                     {
                         if (ButtonRect(b, 1.35f).Contains(mp) || LabelRect(b).Contains(mp))
                         {

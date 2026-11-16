@@ -71,6 +71,11 @@ namespace AutopilotMod
         // Rate-loop integrators (stick units) and throttle integrator
         private float qI, pI, thrI;
         private float gammaCmdSlewed, bankCmdSlewed;
+        private float turnRateMax = 1f;      // rad/s, fastest turn the lift left after the climb gives now
+        private float turnBank = 30f;        // deg, steepest level-turn bank within the g budget (NAV plans its turns with it)
+        private float liftBank;              // deg, + right: bank that points the lift at the climb and the turn wanted
+        private float rollLimit = 25f;       // deg/s, fastest roll the lateral law commands now
+        private float bankLimit = 30f;       // deg, steepest bank the lateral law may fly now (all limits)
         private float gammaPrev = float.NaN, gammaRate;
         private float raltFiltered;
         private float prevSpeed = float.NaN, accelFiltered;
@@ -110,6 +115,7 @@ namespace AutopilotMod
             ApEngaged = false;
             AtEngaged = false;
             Lateral = LateralMode.Hdg;
+            Nav = false;
             Vertical = VerticalMode.Balt;
             State = default;
             prevSpeed = float.NaN;
@@ -278,6 +284,7 @@ namespace AutopilotMod
         public void SelectLateral(LateralMode m)
         {
             Lateral = m;
+            Nav = false;
             SyncLateral();
         }
 
@@ -300,10 +307,10 @@ namespace AutopilotMod
             }
         }
 
-        /// <summary>The RALT button: selects RALT; pressed again it swaps between RALT and terrain following.</summary>
-        public void SelectRaltOrTf()
+        /// <summary>The TF button: terrain following on jets; rotorcraft (no TF) get radar-altitude hold.</summary>
+        public void SelectTf()
         {
-            SelectVertical(Vertical == VerticalMode.Ralt && !Rotorcraft ? VerticalMode.Tf : VerticalMode.Ralt);
+            SelectVertical(Rotorcraft ? VerticalMode.Ralt : VerticalMode.Tf);
         }
 
         public void SyncLateral()
@@ -318,7 +325,7 @@ namespace AutopilotMod
         {
             if (!State.Valid) return;
             TgtAltitude = Mathf.Max(State.Altitude, ApMath.MinAltitudeTarget);
-            TgtRadarAlt = Mathf.Max(State.RadarAlt, cfg.GroundFloor.Value + 2f, ApMath.MinAltitudeTarget);
+            TgtRadarAlt = Mathf.Max(State.RadarAlt, ApMath.MinAltitudeTarget);
             if (Vertical == VerticalMode.Tf) TgtRadarAlt = Mathf.Max(TgtRadarAlt, TfMinClearance);
             raltFiltered = State.RadarAlt;
             // V/S captures the current rate rounded to the display step
@@ -342,6 +349,7 @@ namespace AutopilotMod
         public void NudgeLateral(int dir, bool coarse)
         {
             coarse |= CoarseStep;
+            Nav = false; // turning the heading bug takes over from the route
             if (Lateral == LateralMode.Hdg)
             {
                 float step = coarse ? 10f : 1f;
@@ -360,7 +368,10 @@ namespace AutopilotMod
             switch (Vertical)
             {
                 case VerticalMode.Balt:
-                    TgtAltitude = Mathf.Max(ApMath.MinAltitudeTarget, ApMath.Snap(TgtAltitude, dir, Units.AltStep(coarse)));
+                    // below one ALT step, step like TF so the target reaches sea-skimming heights
+                    float fine = Units.AltStep(false);
+                    bool low = dir > 0 ? TgtAltitude < fine - 0.01f : TgtAltitude <= fine + 0.01f;
+                    TgtAltitude = Mathf.Max(ApMath.MinAltitudeTarget, ApMath.Snap(TgtAltitude, dir, low ? Units.RaltStep(coarse) : Units.AltStep(coarse)));
                     break;
                 case VerticalMode.Ralt:
                     TgtRadarAlt = Mathf.Max(cfg.GroundFloor.Value, ApMath.MinAltitudeTarget, ApMath.Snap(TgtRadarAlt, dir, Units.RaltStep(coarse)));
@@ -410,6 +421,7 @@ namespace AutopilotMod
                 accelFiltered += (a - accelFiltered) * (dt / (0.4f + dt));
             }
             prevSpeed = State.Speed;
+            FollowRoute(ac);
 
             if (ApEngaged)
             {
@@ -478,6 +490,16 @@ namespace AutopilotMod
             return null;
         }
 
+        /// <summary>The fly-by-wire numbers the flight planner predicts turns with; false without one (rotorcraft, old jets).</summary>
+        public static bool FbwNumbers(Aircraft ac, out float gLimit, out float corner, out float maxRollRate)
+        {
+            ControlsFilter.FlyByWire fbw = GetFbw(ac);
+            gLimit = fbw != null ? FbwGLimit(fbw) : 0f;
+            corner = fbw != null ? FbwCorner(fbw) : 0f;
+            maxRollRate = fbw != null ? FbwMaxRollRate(fbw) : 0f;
+            return fbw != null && !IsCollective(ac);
+        }
+
         private static ControlsFilter.FlyByWire GetFbw(Aircraft ac)
         {
             if (!FbwReadable) return null;
@@ -508,18 +530,26 @@ namespace AutopilotMod
             // Flight-path command slew (rad/s). Terrain following replaces the fixed rate with its ride's g.
             bool tf = Vertical == VerticalMode.Tf;
             float slewUp = 4f * Mathf.Deg2Rad, slewDown = slewUp;
+            float qPull = cfg.MaxPullG.Value * G / v, qPush = cfg.MaxPushG.Value * G / v;   // pitch-rate limits, rad/s
+            // The A/P's g budget: AirframeShare of the normal acceleration full stick gives this airframe at
+            // this speed (the fly-by-wire's g limit, less below corner speed). Climb gets it first, the turn the rest.
+            float avail = AirframeShare * PitchRatePerStick(fbw, s) * v;
             float vsCmd;
             switch (Vertical)
             {
                 case VerticalMode.Balt: vsCmd = ApMath.CaptureProfile(TgtAltitude - s.Altitude, k, a, maxVs); break;
                 case VerticalMode.Ralt: vsCmd = ApMath.CaptureProfile(TgtRadarAlt - raltFiltered, k, a, maxVs); break;
                 case VerticalMode.Tf:
-                    float aPull = Mathf.Clamp(cfg.TfPullG.Value, 0.3f, Mathf.Max(cfg.MaxPullG.Value, 0.3f)) * G;
-                    float aPush = Mathf.Clamp(cfg.TfPushG.Value, 0.2f, Mathf.Max(cfg.MaxPushG.Value, 0.2f)) * G;
-                    vsCmd = TfClimbRate(ac, v, k, aPull, aPush, dt);
-                    // The pull-up may use everything the pitch loop is allowed; the push-over stays near the ride's g.
-                    slewUp = Mathf.Max(cfg.MaxPullG.Value * G, aPull) / v;
-                    slewDown = Mathf.Min(1.5f * aPush, Mathf.Max(cfg.MaxPushG.Value * G, aPush)) / v;
+                    // TF's own g limits, not MaxPullG/MaxPushG.
+                    float aPull = Mathf.Min(Mathf.Max(cfg.TfPullG.Value, 0.3f) * G, avail);
+                    float aPush = Mathf.Min(Mathf.Max(cfg.TfPushG.Value, 0.2f) * G, avail);
+                    // Steeply banked, the planned pull only comes once the jet has rolled back to the bank where it
+                    // fits vertically: plan the ride with that roll-out time on top of the loop's lag.
+                    float pullBank = ApMath.BankLimit(avail, ApMath.TfPlanG * aPull, G) * Mathf.Rad2Deg;
+                    float rollOut = Mathf.Max(0f, Mathf.Abs(s.Bank) - pullBank) / (0.6f * rollLimit);
+                    vsCmd = TfClimbRate(ac, v, k, ApMath.TfPlanG * aPull, ApMath.TfPlanG * aPush, TfLoopLag + rollOut, dt);
+                    slewUp = qPull = aPull / v;
+                    slewDown = qPush = aPush / v;
                     break;
                 default: vsCmd = Mathf.Clamp(TgtVs, -maxVs, maxVs); break;
             }
@@ -534,15 +564,16 @@ namespace AutopilotMod
             float maxGammaSin = Mathf.Sin(cfg.MaxFlightPathAngle.Value * Mathf.Deg2Rad);
             float gammaCmd = Mathf.Asin(Mathf.Clamp(vsCmd / v, -maxGammaSin, maxGammaSin));
             float gammaFloor = Mathf.Asin(Mathf.Clamp(floorVs / v, -maxGammaSin, maxGammaSin));
-            gammaCmdSlewed = Mathf.MoveTowards(gammaCmdSlewed, gammaCmd, (gammaCmd > gammaCmdSlewed ? slewUp : slewDown) * dt);
+            float slew = gammaCmd > gammaCmdSlewed ? slewUp : slewDown;
+            // TF smoothing: a small change of command is flown gently, only a big one at the full g limit.
+            if (tf && cfg.TfSmoothing.Value > dt)
+                slew = Mathf.Min(slew, Mathf.Abs(gammaCmd - gammaCmdSlewed) / cfg.TfSmoothing.Value);
+            gammaCmdSlewed = Mathf.MoveTowards(gammaCmdSlewed, gammaCmd, slew * dt);
             // The floor is never delayed by the slew limiter.
             gammaCmdSlewed = Mathf.Max(gammaCmdSlewed, gammaFloor);
             CmdGammaDeg = gammaCmdSlewed * Mathf.Rad2Deg;
 
-            // Coordinated-turn feedforward: in a level turn the body pitch rate is g*sin(phi)*tan(phi)/V.
-            float phi = Mathf.Clamp(Mathf.Abs(s.Bank), 0f, 70f) * Mathf.Deg2Rad;
             float gamma = s.Gamma * Mathf.Deg2Rad;
-            float turnFf = G / v * Mathf.Sin(phi) * Mathf.Tan(phi) * Mathf.Cos(gamma);
 
             // Flight-path-rate damping. Gamma lags pitch by the airframe's lift lag (seconds at low
             // speed), which is what makes a plain gamma loop porpoise; feeding back measured
@@ -557,9 +588,25 @@ namespace AutopilotMod
             else tfCmdRate = 0f;
             tfCmdPrev = gammaCmdSlewed;
 
-            float qCmd = cfg.FlightPathGain.Value * sched * pitchAgility * (gammaCmdSlewed - gamma)
-                         - cfg.FlightPathDamping.Value * (gammaRate - tfCmdRate) + tfCmdRate + turnFf;
-            qCmd = Mathf.Clamp(qCmd, -cfg.MaxPushG.Value * G / v, cfg.MaxPullG.Value * G / v + turnFf);
+            // Flight-path rate wanted (rad/s, vertical).
+            float gammaDot = cfg.FlightPathGain.Value * sched * pitchAgility * (gammaCmdSlewed - gamma)
+                             - cfg.FlightPathDamping.Value * (gammaRate - tfCmdRate) + tfCmdRate;
+
+            // Lift vector (m/s^2): vertically gravity plus that climb, sideways the turn the lateral mode wants
+            // (HDG/NAV: its turn rate; ATT: a level turn at the bank held). The lateral law banks to point the lift
+            // that way (LiftBank); the pull is the lift needed along the bank the jet has now (LiftPull), never
+            // lifting it higher than the climb wanted. So a push-over in a turn keeps pulling round, and a bank held
+            // shallow by the wingtip limit over the water turns slower instead of climbing.
+            float bankNow = Mathf.Clamp(s.Bank, -85f, 85f) * Mathf.Deg2Rad;
+            float lv = G * Mathf.Cos(gamma) + Mathf.Clamp(gammaDot, -qPush, qPull) * v;
+            float ah = Lateral == LateralMode.Hdg ? v * HdgTurnRate(s, float.PositiveInfinity) : lv * Mathf.Tan(bankNow);
+            // budget: the stick's g on top of the share of gravity the bank leaves on the lift axis (pitch rate x V = n g - g cos(bank))
+            liftBank = ApMath.LiftBank(ref lv, ref ah, avail + G * Mathf.Cos(bankNow), G, out float room) * Mathf.Rad2Deg;
+            turnRateMax = room / v;
+            turnBank = Mathf.Min(cfg.MaxBank.Value, ApMath.BankLimit(avail, 0.2f * G, G) * Mathf.Rad2Deg); // 0.2 g kept for the climb loop
+            float qCmd = (ApMath.LiftPull(lv, ah, bankNow, G) - G * Mathf.Cos(gamma) * Mathf.Cos(bankNow)) / v;
+
+            qCmd = Mathf.Clamp(qCmd, -qPush, avail / v); // never past the g budget
             CmdQ = qCmd;
 
             float qPerStick = PitchRatePerStick(fbw, s);
@@ -600,19 +647,14 @@ namespace AutopilotMod
         {
             FlightState s = State;
             float v = Mathf.Max(s.Speed, 40f);
-            float maxBank = cfg.MaxBank.Value;
+            // The climb's share of the lift is already taken out of the bank (FlyVertical's lift vector).
+            float maxBank = Nav && navHardTurn ? 85f : cfg.MaxBank.Value; // fly-over's hard turn: the g budget sets the bank
 
             float bankCmd;
             if (Lateral == LateralMode.Hdg)
-            {
-                float err = Mathf.DeltaAngle(s.Heading, TgtHeading);  // + => turn right
-                float rateCmd = Mathf.Clamp(cfg.HeadingGain.Value * err, -cfg.MaxTurnRate.Value, cfg.MaxTurnRate.Value);
-                bankCmd = Mathf.Atan(rateCmd * Mathf.Deg2Rad * v / G) * Mathf.Rad2Deg;
-            }
+                bankCmd = liftBank; // points the lift at the turn and the climb together (FlyVertical)
             else
-            {
                 bankCmd = TgtBank;
-            }
             // Near the surface, limit bank so the low wingtip stays above the floor
             // (a 15 m span at 35 deg drops the tip ~4 m below the radar-altitude reference).
             float originHeight = s.RadarAlt + s.GearDrop;
@@ -625,8 +667,10 @@ namespace AutopilotMod
             }
             else BankLimitedBySurface = false;
 
+            bankLimit = maxBank;
             bankCmd = Mathf.Clamp(bankCmd, -maxBank, maxBank);
-            float maxRoll = cfg.MaxRollRate.Value * rollAgility;
+            // the configured rate, but never more than AirframeShare of the airframe's own full-stick roll rate
+            float maxRoll = rollLimit = Mathf.Min(cfg.MaxRollRate.Value * rollAgility, AirframeShare * RollRatePerStick(fbw, s) * Mathf.Rad2Deg);
             bankCmdSlewed = Mathf.MoveTowards(bankCmdSlewed, bankCmd, 0.6f * maxRoll * dt);
             CmdBankDeg = bankCmdSlewed;
 
@@ -641,6 +685,17 @@ namespace AutopilotMod
             if (!(stick > 1f && pErr > 0f) && !(stick < -1f && pErr < 0f))
                 pI = pINext;
             OutRoll = Mathf.Clamp((pCmd + cfg.RollRateGain.Value * pErr) / pPerStick + pI, -1f, 1f);
+        }
+
+        /// <summary>
+        /// Turn rate the HDG law commands (rad/s, + right; NAV: its L1 guidance's), no faster than
+        /// <paramref name="most"/> (rad/s).
+        /// </summary>
+        private float HdgTurnRate(FlightState s, float most)
+        {
+            // fly-over's hard turn: only the g budget limits it
+            float max = Nav && navHardTurn ? most : Mathf.Min(cfg.MaxTurnRate.Value * Mathf.Deg2Rad, most);
+            return Mathf.Clamp(Nav ? navTurnRate : cfg.HeadingGain.Value * Mathf.DeltaAngle(s.Heading, TgtHeading) * Mathf.Deg2Rad, -max, max);
         }
 
         /// <summary>Body roll rate (rad/s) per unit of stick.</summary>

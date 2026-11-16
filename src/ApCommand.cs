@@ -9,7 +9,7 @@ namespace AutopilotMod
         ModeHdg,
         ModeAtt,
         ModeBalt,
-        ModeRalt,
+        ModeTf,
         ModeVs,
         LatUp,
         LatDown,
@@ -23,6 +23,7 @@ namespace AutopilotMod
         SyncAll,
         StepToggle,
         DataToggle,
+        SoundToggle,
         Hide,
 
         // radar coverage page
@@ -38,5 +39,17 @@ namespace AutopilotMod
         RdrRcsUp,
         RdrRcsDown,
         RdrRcsOwn,
+        ModeNav,
+        WptClear,
+
+        // A/P MFD settings page
+        SetPage,
+        NavTurnToggle,
+        SetPrev,
+        SetNext,
+        SetValUp,
+        SetValDown,
+        SetDefault,
+        SetResetAll,
     }
 }

@@ -9,7 +9,7 @@ namespace AutopilotMod
     internal static class ApMath
     {
         /// <summary>Lowest altitude / radar-altitude target the A/P accepts (m).</summary>
-        public const float MinAltitudeTarget = 1f;
+        public const float MinAltitudeTarget = 2f;
 
         // Helicopter height loop: collective rate (1/s) per m/s^2 of vertical-acceleration error, and
         // acceleration demanded per m/s of climb-rate error.
@@ -75,6 +75,8 @@ namespace AutopilotMod
         // ---- terrain following ----
         // Share of the planned pull-up g the safety bound counts on; the rest is margin for the loop's lag.
         private const float TfSafetyShare = 0.7f;
+        /// <summary>Share of TF's g limits the ride is planned with; the rest is the flight-path loop's margin to catch up.</summary>
+        public const float TfPlanG = 0.6f;
         // Flight-path angles are in radians and treated as slopes (fine up to the ~20 deg the A/P flies).
 
         /// <summary>
@@ -157,7 +159,9 @@ namespace AutopilotMod
                 float dh = rel[i] + clearance - climbed;
 
                 // Safety: from the real distance, less the loop's reaction time.
-                float hard = TfHardSlope(dh, Math.Max(d - react, 0.5f * v), maxGamma, kHard, ref limited);
+                // A descent carries on for the reaction time before a pull-up bites: count the height lost in it.
+                float sunk = -Math.Min(gamma, 0f) * Math.Min(d, react);
+                float hard = TfHardSlope(dh + sunk, Math.Max(d - react, 0.5f * v), maxGamma, kHard, ref limited);
                 if (hard > best) best = hard;
 
                 if (dh <= 0f) continue;
@@ -177,5 +181,153 @@ namespace AutopilotMod
         /// </summary>
         public static float Agility(float maxRate, float agileRate, float min) =>
             Math.Max(min, Math.Min(1f, maxRate / agileRate));
+
+        /// <summary>
+        /// Steepest bank (rad) at which the lift still gives the vertical acceleration
+        /// <paramref name="aVert"/> (m/s^2, on top of holding 1 g against gravity) within
+        /// <paramref name="qa"/>, the normal acceleration the A/P may command (pitch rate x speed,
+        /// = n*g - g*cos(bank)). The vertical need is met first; the turn gets what is left. Solves
+        /// (qa + g*c)*c = g + aVert for c = cos(bank): 0 when the jet needs all of it to climb, 90 deg
+        /// when it wants 0 g.
+        /// </summary>
+        public static float BankLimit(float qa, float aVert, float g)
+        {
+            float c = (-qa + (float)Math.Sqrt(Math.Max(0f, qa * qa + 4f * g * (g + aVert)))) / (2f * g);
+            return (float)Math.Acos(Math.Min(Math.Max(c, 0f), 1f));
+        }
+
+        /// <summary>
+        /// Lift allocation (m/s^2). <paramref name="lv"/> = vertical lift wanted (gravity plus the climb wanted;
+        /// below 0 = push), <paramref name="ah"/> = horizontal (the turn, + right). Both are trimmed to
+        /// <paramref name="nMax"/>, climb first; <paramref name="room"/> = the most sideways lift left.
+        /// Returns the bank (rad, + right) that points the lift that way, but never steeper than a level
+        /// turn for the same sideways pull: pushing over in a turn keeps that bank and keeps pulling round
+        /// (no lift, no turn), and a small correction while pushing stays a small bank.
+        /// </summary>
+        public static float LiftBank(ref float lv, ref float ah, float nMax, float g, out float room)
+        {
+            lv = Math.Min(lv, nMax);
+            float up = Math.Max(lv, 0f);
+            room = (float)Math.Sqrt(Math.Max(0f, nMax * nMax - up * up));
+            ah = Math.Max(-room, Math.Min(room, ah));
+            return (float)Math.Atan2(ah, Math.Max(lv, g));
+        }
+
+        /// <summary>Normal acceleration (m/s^2) to pull at the jet's actual bank: the wanted lift projected onto its lift axis.</summary>
+        public static float LiftAlong(float lv, float ah, float bank) => lv * (float)Math.Cos(bank) + ah * (float)Math.Sin(bank);
+
+        /// <summary>
+        /// The pull (normal acceleration, m/s^2) at the jet's actual bank: the wanted lift projected onto
+        /// its lift axis (LiftAlong), but never more lift upward than the climb wanted (at least 1 g), and
+        /// never less than it while that is positive. Short of the bank wanted (rolling in, or held shallow
+        /// near the water by the wingtip limit) a pull for the whole turn would mostly lift the jet: it
+        /// turns slower and holds its height instead. Past it (rolling out) it keeps its height.
+        /// </summary>
+        public static float LiftPull(float lv, float ah, float bank, float g)
+        {
+            float c = Math.Max((float)Math.Cos(bank), 0.05f);
+            float hi = Math.Max(lv, g) / c, lo = lv > 0f ? lv / c : float.NegativeInfinity;
+            return Math.Max(lo, Math.Min(hi, LiftAlong(lv, ah, bank)));
+        }
+
+        /// <summary>Distance (m) from point P to the segment A-B.</summary>
+        public static float SegmentDistance(float px, float pz, float ax, float az, float bx, float bz)
+        {
+            float lx = bx - ax, lz = bz - az, l2 = lx * lx + lz * lz;
+            float t = l2 > 0f ? Math.Min(Math.Max(((px - ax) * lx + (pz - az) * lz) / l2, 0f), 1f) : 0f;
+            float dx = px - (ax + t * lx), dz = pz - (az + t * lz);
+            return (float)Math.Sqrt(dx * dx + dz * dz);
+        }
+
+        /// <summary>How far along the leg A->B the jet (at 0,0) is, in m: 0 at A, the leg's length at B.</summary>
+        public static float AlongTrack(float ax, float az, float bx, float bz)
+        {
+            float lx = bx - ax, lz = bz - az, len = (float)Math.Sqrt(lx * lx + lz * lz);
+            return len < 1f ? 0f : (-ax * lx - az * lz) / len;
+        }
+
+        /// <summary>
+        /// Distance to fly from the jet (at 0,0) along the path through the <paramref name="n"/> points in
+        /// <paramref name="xz"/> (x0,z0,x1,z1,.. relative to the jet): to the path's end, or, with a target T,
+        /// along the path to its point nearest T (the first one, on a tie) and then straight to T.
+        /// </summary>
+        public static float PathDistance(float[] xz, int n, float tx, float tz, bool toTarget)
+        {
+            float ax = 0f, az = 0f, run = 0f;
+            float bestOff = (float)Math.Sqrt(tx * tx + tz * tz), best = bestOff; // break off right away
+            for (int i = 0; i < n; i++)
+            {
+                float bx = xz[2 * i], bz = xz[2 * i + 1], lx = bx - ax, lz = bz - az;
+                float len = (float)Math.Sqrt(lx * lx + lz * lz);
+                if (toTarget && len > 0f)
+                {
+                    float t = Math.Min(Math.Max(((tx - ax) * lx + (tz - az) * lz) / (len * len), 0f), 1f);
+                    float px = ax + lx * t - tx, pz = az + lz * t - tz, off = (float)Math.Sqrt(px * px + pz * pz);
+                    if (off < bestOff - 1f)
+                    {
+                        bestOff = off;
+                        best = run + len * t + off;
+                    }
+                }
+                run += len;
+                ax = bx;
+                az = bz;
+            }
+            return toTarget ? best : run;
+        }
+
+        /// <summary>
+        /// NAV steering point: <paramref name="look"/> m on along the leg A->B past the jet's abeam point,
+        /// never past B. Positions relative to the jet (at 0,0). Flying at it joins the drawn line and holds
+        /// it; NAV moves on to the next leg at the turn point, so corners are flown from there.
+        /// </summary>
+        public static void LegCarrot(float ax, float az, float bx, float bz, float look, out float cx, out float cz)
+        {
+            float lx = bx - ax, lz = bz - az, len = (float)Math.Sqrt(lx * lx + lz * lz);
+            float along = len < 1f ? len : Math.Min(Math.Max(AlongTrack(ax, az, bx, bz) + look, 0f), len);
+            cx = len < 1f ? bx : ax + lx / len * along;
+            cz = len < 1f ? bz : az + lz / len * along;
+        }
+
+        /// <summary>
+        /// How far ahead (s of flight) NAV steers on a leg, never less than a turn radius. Short look-aheads
+        /// bank hard for small errors at jet speeds and swing back and forth after each turn.
+        /// </summary>
+        public const float NavLookSeconds = 8f;
+
+        /// <summary>
+        /// L1 guidance (Park, Deyst and How, 2004): the turn rate (rad/s, + right) that flies the jet,
+        /// moving at vx/vz, onto the circle through the steering point cx/cz (relative to the jet) that is
+        /// tangent to its track: 2 v sin(eta) / L, eta = angle from the track to the point, L = its
+        /// distance. Past 90 deg off the nose it turns at the 90 deg rate.
+        /// </summary>
+        public static float L1TurnRate(float vx, float vz, float cx, float cz)
+        {
+            float v = (float)Math.Sqrt(vx * vx + vz * vz), l = (float)Math.Sqrt(cx * cx + cz * cz);
+            if (v < 1f || l < 1f) return 0f;
+            float cross = vz * cx - vx * cz, dot = vx * cx + vz * cz; // + cross = point to the right
+            float sinEta = dot >= 0f ? cross / (v * l) : Math.Sign(cross);
+            return 2f * v * sinEta / l;
+        }
+
+        public const float MinWaypointLead = 300f;
+
+        /// <summary>Fly-over NAV: how far (m) inside a waypoint the hard turn's roll-in may start.</summary>
+        public const float FlyOverMiss = 2f;
+
+        /// <summary>
+        /// Fly-over NAV: seconds before the waypoint the hard turn may start and still pass within
+        /// FlyOverMiss of it. Rolling in at <paramref name="rollRate"/> (rad/s) the track curves away by g*rollRate*t^3/6.
+        /// </summary>
+        public static float FlyOverLeadTime(float rollRate, float g) =>
+            (float)Math.Pow(6.0 * FlyOverMiss / (g * Math.Max(rollRate, 0.05f)), 1.0 / 3.0);
+
+        /// <summary>
+        /// Fly-over hard turn: roll out once the heading still to turn (<paramref name="eta"/>, rad) is what the
+        /// roll-out itself turns through: rolling <paramref name="bank"/> (rad) off at <paramref name="rollRate"/> (rad/s)
+        /// turns the integral of g tan(bank)/v, = g (-ln cos bank) / (v rollRate).
+        /// </summary>
+        public static bool HardTurnDone(float eta, float bank, float rollRate, float v, float g) =>
+            Math.Abs(eta) <= g * -Math.Log(Math.Max(Math.Cos(bank), 0.05)) / (v * Math.Max(rollRate, 0.05f));
     }
 }

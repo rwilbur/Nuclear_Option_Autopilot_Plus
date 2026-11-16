@@ -79,8 +79,7 @@ namespace AutopilotMod
                 foreach (MapIcon icon in map.mapIcons)
                 {
                     if (!(icon is UnitMapIcon ui) || !ShownEnemy(ui, t)) continue;
-                    TrackingInfo track = map.HQ != null ? map.HQ.GetTrackingData(ui.unit.persistentID) : null;
-                    nearby.Add(new KeyValuePair<float, Unit>(((track != null ? track.GetPosition() : ui.unit.GlobalPosition()) - me).magnitude, ui.unit));
+                    if (KnownPosition(ui.unit, out GlobalPosition p)) nearby.Add(new KeyValuePair<float, Unit>((p - me).magnitude, ui.unit));
                 }
                 nearby.Sort((a, b) => a.Key.CompareTo(b.Key));
             }
@@ -143,6 +142,17 @@ namespace AutopilotMod
                         }
                     break;
             }
+        }
+
+        /// <summary>
+        /// Where our side knows an enemy is: its live position while tracked, else its last known one
+        /// (the game's TrackingInfo). False if never tracked - never the true position the pilot can't know.
+        /// </summary>
+        public static bool KnownPosition(Unit u, out GlobalPosition p)
+        {
+            DynamicMap map = SceneSingleton<DynamicMap>.i;
+            p = default;
+            return map != null && map.HQ != null && map.HQ.TryGetKnownPosition(u, out p);
         }
 
         /// <summary>The jet's weapon target list (what the map and HUD show as selected), or null.</summary>

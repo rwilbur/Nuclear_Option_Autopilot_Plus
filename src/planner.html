@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flight Planner</title>
+<style>
+html,body{margin:0;height:100%;background:#0b0f0c;overflow:hidden;font:12px Consolas,monospace;color:#5cff73}
+#map{position:fixed;inset:0;width:100vw;height:100vh;touch-action:none;cursor:crosshair}
+#side{position:fixed;top:8px;right:8px;width:min(500px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow-y:auto;box-sizing:border-box;padding:6px 10px 10px;background:#000d;border:1px solid #349442;border-radius:4px}
+#side.min>:not(h1){display:none}
+h1{display:flex;align-items:center;margin:0 0 4px;font-size:13px;color:#5cff73}
+h1 span{flex:1}
+.gh{display:block;margin:8px 0 2px;font-size:11px;color:#349442}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:2px 0}
+button,select,input{font:inherit;padding:3px 6px;min-height:26px;background:#111;color:#5cff73;border:1px solid #333;border-radius:3px;box-sizing:border-box}
+button{cursor:pointer;color:#ffbd33;border-color:#ffbd33}
+button.dim{color:#666;border-color:#333}
+select{max-width:100%}
+input[type=number]{width:7ch}
+input[type=text]{flex:1;min-width:10ch}
+#grid{margin-top:2px;max-height:45vh;overflow:auto;border:1px solid #333;outline:none}
+#grid:focus{border-color:#ff73ff}
+#grid table{border-collapse:collapse;table-layout:fixed;width:max-content;min-width:100%}
+#grid th{position:sticky;top:0;z-index:1;background:#111;font-weight:normal;color:#349442;text-align:right;padding:2px 4px;border:1px solid #222;white-space:nowrap}
+#grid{touch-action:manipulation}
+#grid td{text-align:right;padding:2px 4px;border:1px solid #222;color:#ff73ff;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;cursor:cell;user-select:none;height:18px}
+#grid td.ro{color:#349442}
+#grid td.sel{background:#3a1d40}
+#grid td.act{outline:2px solid #ff73ff;outline-offset:-2px}
+#grid td.empty{color:#349442;text-align:left;cursor:default}
+#grid td input{width:100%;box-sizing:border-box;border:0;padding:0;min-height:0;height:18px;background:#000;color:#fff;text-align:right;font:inherit}
+.warn{color:#ffbd33}
+.note{color:#349442;margin:6px 0 0}
+#msg{color:#ffbd33;min-height:1.2em}
+</style></head><body>
+<canvas id="map"></canvas>
+<div id="side">
+<h1><span>FLIGHT PLANNER</span><button id="min" title="Minimise">_</button></h1>
+<span class="gh">MAP &middot; AIRFRAME (PREDICTED PATH) &middot; START SPEED</span>
+<div class="row"><select id="mapSel"></select><button id="fit">FIT</button></div>
+<div class="row"><select id="afSel"></select><input id="v0" type="number" min="1" step="any" title="Speed at the first waypoint"><span class="sunit"></span></div>
+<span class="gh">PLAN</span>
+<div class="row"><input id="name" type="text" placeholder="plan name"><button id="save">SAVE</button><button id="new">NEW</button><button id="undo" title="Ctrl+Z">UNDO</button></div>
+<div class="row"><select id="plans"></select><button id="load">LOAD</button><button id="del">DELETE</button></div>
+<div class="row"><button id="export">EXPORT FILE</button><button id="import">IMPORT FILE</button><input id="file" type="file" accept=".json,application/json" hidden></div>
+<div class="row" id="jet" hidden><button id="send">SEND TO JET</button><button id="fetch">LOAD FROM JET</button></div>
+<div id="msg"></div>
+<span class="gh">WAYPOINTS &middot; HEIGHT ABOVE GROUND &middot; SPEED FOR THE LEG TO IT (EMPTY = KEEP) &middot; E/N = KM EAST/NORTH OF THE MAP CENTRE</span>
+<div class="row"><button id="insRow" title="Insert a waypoint above the selected row">INSERT ROW</button><button id="delRows" title="Delete the selected rows">DELETE ROWS</button></div>
+<div id="grid" tabindex="0"><table><thead><tr id="ghead"></tr></thead><tbody id="wps"></tbody></table></div>
+<p class="note">Spreadsheet: click / drag / Shift+click or Shift+arrows to select, type or Enter / F2 / double-click to edit, Enter / Tab to move on. Ctrl+Enter puts the value in every selected cell. Ctrl+C / Ctrl+V copy and paste with Excel or Sheets (rows pasted past the end become new waypoints); Delete clears speeds; Ctrl+A selects all.</p>
+<div id="tot" class="note"></div>
+<p class="note">Click: add waypoint (on the line: insert). Drag a waypoint: move it. Right-click: delete. Wheel over a waypoint: height; Shift+wheel: speed. Elsewhere drag = pan, wheel = zoom. Touch: tap = add, long-press a waypoint = delete, pinch = zoom, tap a cell to edit it. Cyan = predicted path, a tick every minute. Maps appear after one flight on them with the mod, airframes after one flight in them.</p>
+</div>
+<script>
+// Data files call these: maps.js -> maps([...]), airframes.js -> airframes({...}), maps/X.js -> map({...})
+const DATA = { maps: [], af: null, map: null };
+window.PLANNER = { maps: l => { DATA.maps = l; }, airframes: o => { DATA.af = o; }, map: m => { DATA.map = m; window.dispatchEvent(new Event('mapdata')); } };
+</script>
+<script src="maps.js"></script>
+<script src="airframes.js"></script>
+<script id="sim">
+// ---- predicted path: the autopilot's NAV (RouteNav + ApMath), as a point mass. Keep in step with the C#. ----
+const G = 9.81, RAD = Math.PI / 180;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// steepest bank whose lift still gives aVert of climb within the budget qa (ApMath.BankLimit)
+const bankLimit = (qa, aVert) => Math.acos(clamp((-qa + Math.sqrt(Math.max(0, qa * qa + 4 * G * (G + aVert)))) / (2 * G), 0, 1));
+// normal acceleration the A/P may command at speed v, sea level (share x FlightController.PitchRatePerStick x v)
+function budget(af, set, v) {
+  const corner = Math.max(af.corner, 1);
+  let q = af.gLimit * G / Math.max(v, corner * 0.75);
+  const qbar = v * v / (corner * corner);
+  if (qbar < 1) q *= clamp(qbar, 0.3, 1);
+  return set.share * q * v;
+}
+// sustained level turn rate (rad/s): bank that keeps 0.2 g for the climb loop (FlightController.turnBank), within MaxBank and MaxTurnRate
+const turnRate = (af, set, v) => Math.min(set.maxTurnRate * RAD, G * Math.tan(Math.min(set.maxBank * RAD, bankLimit(budget(af, set, v), 0.2 * G))) / v);
+const along = (ax, az, bx, bz) => { const lx = bx - ax, lz = bz - az, l = Math.hypot(lx, lz); return l < 1 ? 0 : (-ax * lx - az * lz) / l; };
+const NAV_LOOK_SECONDS = 8; // ApMath.NavLookSeconds
+function carrot(ax, az, bx, bz, look) {
+  const lx = bx - ax, lz = bz - az, len = Math.hypot(lx, lz);
+  if (len < 1) return [bx, bz];
+  const a = clamp(along(ax, az, bx, bz) + look, 0, len);
+  return [ax + lx / len * a, az + lz / len * a];
+}
+function l1Rate(vx, vz, cx, cz) {
+  const v = Math.hypot(vx, vz), l = Math.hypot(cx, cz);
+  if (v < 1 || l < 1) return 0;
+  const cross = vz * cx - vx * cz, dot = vx * cx + vz * cz;
+  return 2 * v * (dot >= 0 ? cross / (v * l) : Math.sign(cross)) / l;
+}
+const turnAngle = (ax, az, bx, bz) => Math.atan2(az * bx - ax * bz, ax * bx + az * bz);
+/** Fly the plan from waypoint 0 toward 1. Returns the path ([x, z] once a second), and per waypoint the time reached and closest pass. */
+function predict(wps, af, set, v0) {
+  const n = wps.length, path = [], time = wps.map(() => NaN), miss = wps.map(() => Infinity);
+  if (n < 2) return { path, time, miss };
+  let x = wps[0].x, z = wps[0].z, v = wps[0].s || v0, vt = wps[1].s || v;
+  let hdg = Math.atan2(wps[1].x - x, wps[1].z - z), w = 0, lx = x, lz = z, i = 1, t = 0;
+  const dt = 0.05, lag = 1, accel = 8; // shortcut: A/T modelled as 8 m/s^2 either way; real thrust/drag differ by airframe
+  time[0] = 0; miss[0] = 0;
+  path.push([x, z]);
+  while (i < n && t < 7200) {
+    for (let k = Math.max(0, i - 1); k <= i; k++) miss[k] = Math.min(miss[k], Math.hypot(wps[k].x - x, wps[k].z - z));
+    const ax = lx - x, az = lz - z, bx = wps[i].x - x, bz = wps[i].z - z, next = i + 1 < n;
+    const nx = next ? wps[i + 1].x - x : 0, nz = next ? wps[i + 1].z - z : 0;
+    const om = turnRate(af, set, Math.max(v, 40)), radius = Math.max(v, 40) / om;
+    const turn = next ? turnAngle(bx - ax, bz - az, nx - bx, nz - bz) : 0;
+    const lead = radius * Math.tan(Math.min(Math.abs(turn), 2.6) / 2);
+    if (along(ax, az, bx, bz) >= Math.hypot(bx - ax, bz - az) - lead || bx * bx + bz * bz < 300 * 300) {
+      time[i] = t; lx = wps[i].x; lz = wps[i].z; i++;
+      if (i < n && wps[i].s) vt = wps[i].s;
+      continue;
+    }
+    const vx = v * Math.sin(hdg), vz = v * Math.cos(hdg);
+    const [cx, cz] = carrot(ax, az, bx, bz, Math.max(radius, NAV_LOOK_SECONDS * v));
+    w += (clamp(l1Rate(vx, vz, cx, cz), -om, om) - w) * dt / lag;
+    hdg += w * dt; x += vx * dt; z += vz * dt; t += dt;
+    v += clamp(vt - v, -accel * dt, accel * dt);
+    if (Math.floor(t) !== Math.floor(t - dt)) path.push([x, z]);
+  }
+  for (let k = Math.max(0, i - 1); k < n; k++) if (k < i) miss[k] = Math.min(miss[k], Math.hypot(wps[k].x - x, wps[k].z - z));
+  path.push([x, z]);
+  return { path, time, miss };
+}
+if (typeof module !== 'undefined') module.exports = { predict, turnRate, bankLimit };
+</script>
+<script>
+const $ = id => document.getElementById(id);
+const cv = $('map'), ctx = cv.getContext('2d');
+const store = { get: (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+const set = Object.assign({ metric: true, maxBank: 90, maxTurnRate: 40, share: 0.8, minSpeed: 50 }, DATA.af || {});
+const GENERIC = { name: 'Generic fighter (9 g, 150 m/s corner)', gLimit: 9, corner: 150, roll: 5 };
+const airframes = [...((DATA.af && DATA.af.list) || []), GENERIC];
+const U = set.metric
+  ? { h: 'M', hk: 1, hstep: 10, s: 'KMH', sk: 3.6, sstep: 50 / 3.6 }
+  : { h: 'FT', hk: 3.28084, hstep: 50 / 3.28084, s: 'KT', sk: 1.94384, sstep: 50 / 1.94384 };
+for (const e of document.querySelectorAll('.sunit')) e.textContent = U.s;
+const say = t => { $('msg').textContent = t; };
+
+// ---- state ----
+let plan = { v: 1, name: '', map: '', airframe: airframes[0].name, start: 250, wps: [] };
+let undo = [], pred = { path: [], time: [], miss: [] };
+let mapImg = null, reliefImg = null, view = { x: 0, z: 0, s: 0.005 };
+const snapshot = () => { undo.push(JSON.stringify(plan.wps)); if (undo.length > 100) undo.shift(); };
+const af = () => airframes.find(a => a.name === plan.airframe) || airframes[0];
+
+// ---- map ----
+$('mapSel').replaceChildren(...(DATA.maps.length ? DATA.maps : ['(no maps yet: fly one with the mod)']).map(n => new Option(n, n)));
+function loadMap(name) {
+  if (!DATA.maps.includes(name)) return;
+  plan.map = name; $('mapSel').value = name; store.set('fp-map', name);
+  DATA.map = null; mapImg = reliefImg = null; draw();
+  const s = document.createElement('script');
+  s.src = `maps/${name}.js?${Date.now()}`;
+  s.onerror = () => say(`Can't load maps/${name}.js`);
+  document.head.append(s);
+}
+addEventListener('mapdata', () => {
+  const m = DATA.map;
+  mapImg = new Image(); mapImg.onload = draw; mapImg.src = m.img;
+  reliefImg = new Image(); reliefImg.onload = draw; reliefImg.src = m.relief;
+  fit();
+});
+$('mapSel').onchange = () => loadMap($('mapSel').value);
+function fit() {
+  const m = DATA.map;
+  if (plan.wps.length > 1) {
+    const xs = plan.wps.map(w => w.x), zs = plan.wps.map(w => w.z), pad = 4000;
+    const w = Math.max(...xs) - Math.min(...xs) + 2 * pad, h = Math.max(...zs) - Math.min(...zs) + 2 * pad;
+    view = { x: (Math.max(...xs) + Math.min(...xs)) / 2, z: (Math.max(...zs) + Math.min(...zs)) / 2, s: Math.min(cv.width / w, cv.height / h) };
+  } else if (m) view = { x: 0, z: 0, s: Math.min(cv.width / m.w, cv.height / m.h) };
+  draw();
+}
+$('fit').onclick = fit;
+
+// ---- airframe / speed ----
+$('afSel').replaceChildren(...airframes.map(a => new Option(a.name, a.name)));
+$('afSel').onchange = () => { plan.airframe = $('afSel').value; update(); };
+$('v0').onchange = () => { const v = +$('v0').value / U.sk; if (v > 0) { plan.start = v; update(); } };
+
+// ---- drawing ----
+const sx = x => cv.width / 2 + (x - view.x) * view.s, sy = z => cv.height / 2 - (z - view.z) * view.s;
+const wx = px => view.x + (px - cv.width / 2) / view.s, wz = py => view.z - (py - cv.height / 2) / view.s;
+let queued = false;
+function draw() { if (!queued) { queued = true; requestAnimationFrame(paint); } }
+function paint() {
+  queued = false;
+  const dpr = devicePixelRatio || 1;
+  if (cv.width !== Math.round(cv.clientWidth * dpr) || cv.height !== Math.round(cv.clientHeight * dpr)) {
+    const k = Math.round(cv.clientWidth * dpr) / Math.max(cv.width, 1);
+    cv.width = Math.round(cv.clientWidth * dpr); cv.height = Math.round(cv.clientHeight * dpr); view.s *= k || 1;
+  }
+  ctx.fillStyle = '#0b0f0c'; ctx.fillRect(0, 0, cv.width, cv.height);
+  const m = DATA.map;
+  if (m && mapImg && mapImg.complete) { ctx.globalAlpha = 0.8; ctx.drawImage(mapImg, sx(-m.w / 2), sy(m.h / 2), m.w * view.s, m.h * view.s); ctx.globalAlpha = 1; }
+  if (m && reliefImg && reliefImg.complete) ctx.drawImage(reliefImg, sx(-m.grid / 2), sy(m.grid / 2), m.grid * view.s, m.grid * view.s);
+  const dpx = dpr;
+  // predicted path with a tick every minute
+  if (pred.path.length > 1) {
+    ctx.strokeStyle = '#33ccff'; ctx.lineWidth = 2 * dpx; ctx.beginPath();
+    pred.path.forEach(([x, z], k) => k ? ctx.lineTo(sx(x), sy(z)) : ctx.moveTo(sx(x), sy(z)));
+    ctx.stroke();
+    ctx.fillStyle = '#33ccff';
+    for (let k = 60; k < pred.path.length; k += 60) ctx.fillRect(sx(pred.path[k][0]) - 2 * dpx, sy(pred.path[k][1]) - 2 * dpx, 4 * dpx, 4 * dpx);
+  }
+  // route
+  const wps = plan.wps;
+  ctx.strokeStyle = '#ff73ffcc'; ctx.lineWidth = 2 * dpx; ctx.setLineDash([8 * dpx, 6 * dpx]); ctx.beginPath();
+  wps.forEach((w, k) => k ? ctx.lineTo(sx(w.x), sy(w.z)) : ctx.moveTo(sx(w.x), sy(w.z)));
+  ctx.stroke(); ctx.setLineDash([]);
+  ctx.font = `${12 * dpx}px Consolas,monospace`; ctx.textBaseline = 'middle';
+  wps.forEach((w, k) => {
+    const x = sx(w.x), y = sy(w.z), r = 7 * dpx;
+    const r0 = Math.min(cur.r, anc.r), r1 = Math.max(cur.r, anc.r); // rows selected in the grid
+    ctx.strokeStyle = k === hover || (k >= r0 && k <= r1) ? '#fff' : '#ff73ff'; ctx.lineWidth = 2 * dpx;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.stroke();
+    const label = `${k + 1}  ${Math.round(w.h * U.hk)} ${U.h}` + (w.s ? `  ${Math.round(w.s * U.sk)} ${U.s}` : '');
+    ctx.fillStyle = '#000a'; ctx.fillRect(x + r + 3 * dpx, y - 8 * dpx, ctx.measureText(label).width + 6 * dpx, 16 * dpx);
+    ctx.fillStyle = '#ff73ff'; ctx.fillText(label, x + r + 6 * dpx, y);
+  });
+  if (!m) { ctx.fillStyle = '#349442'; ctx.fillText(DATA.maps.length ? 'loading map...' : 'No maps yet: fly once on a map with the mod to export it.', 20 * dpx, 20 * dpx); }
+}
+addEventListener('resize', draw);
+
+// ---- waypoint grid: a small spreadsheet ----
+const fmtTime = t => isNaN(t) ? '' : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+const legKm = k => k ? (Math.hypot(plan.wps[k].x - plan.wps[k - 1].x, plan.wps[k].z - plan.wps[k - 1].z) / 1000).toFixed(1) : '';
+// get: shown / copied text; set: from a number typed or pasted; clear: what Delete or an empty cell does (none = can't be empty)
+const MIN_H = 2; // lowest waypoint height (m): the autopilot's TF minimum (ApMath.MinAltitudeTarget)
+const COLS = [
+  { t: '#', w: 4, ro: true, get: (w, k) => k + 1 },
+  { t: 'E KM', w: 9, get: w => (w.x / 1000).toFixed(2), set: (w, v) => { w.x = v * 1000; } },
+  { t: 'N KM', w: 9, get: w => (w.z / 1000).toFixed(2), set: (w, v) => { w.z = v * 1000; } },
+  { t: `HEIGHT ${U.h}`, w: 9, get: w => Math.round(w.h * U.hk), set: (w, v) => { w.h = Math.max(MIN_H, v / U.hk); }, keypad: true },
+  { t: `SPEED ${U.s}`, w: 10, get: w => w.s ? Math.round(w.s * U.sk) : '', set: (w, v) => { w.s = v > 0 ? Math.max(set.minSpeed, v / U.sk) : null; }, clear: w => { w.s = null; }, keypad: true },
+  { t: 'LEG KM', w: 8, ro: true, get: (w, k) => legKm(k) },
+  { t: 'TIME', w: 7, ro: true, get: (w, k) => fmtTime(pred.time[k]) },
+  { t: 'MISS KM', w: 8, ro: true, get: (w, k) => isFinite(pred.miss[k]) ? (pred.miss[k] / 1000).toFixed(1) : '', warn: k => pred.miss[k] > 1000, title: 'Closest the predicted path passes the waypoint' },
+];
+let cur = { r: 0, c: 3 }, anc = { r: 0, c: 3 }, editing = null, dragSel = false;
+const sel = () => ({ r0: Math.min(cur.r, anc.r), r1: Math.max(cur.r, anc.r), c0: Math.min(cur.c, anc.c), c1: Math.max(cur.c, anc.c) });
+const cells = () => { const s = sel(), out = []; for (let r = s.r0; r <= s.r1; r++) for (let c = s.c0; c <= s.c1; c++) out.push([r, c]); return out; };
+const num = v => { const n = parseFloat(String(v).trim().replace(',', '.')); return isFinite(n) ? n : NaN; };
+function grid() {
+  const n = plan.wps.length, last = Math.max(n - 1, 0);
+  cur.r = clamp(cur.r, 0, last); anc.r = clamp(anc.r, 0, last);
+  $('ghead').replaceChildren(...COLS.map(c => { const th = document.createElement('th'); th.textContent = c.t; th.style.width = `${c.w}ch`; if (c.title) th.title = c.title; return th; }));
+  const s = sel();
+  const rows = plan.wps.map((w, k) => {
+    const tr = document.createElement('tr');
+    COLS.forEach((col, j) => {
+      const td = document.createElement('td');
+      td.textContent = String(col.get(w, k));
+      td.dataset.r = k; td.dataset.c = j;
+      td.className = [col.ro && 'ro', col.warn && col.warn(k) && 'warn', k >= s.r0 && k <= s.r1 && j >= s.c0 && j <= s.c1 && 'sel', k === cur.r && j === cur.c && 'act'].filter(Boolean).join(' ');
+      tr.append(td);
+    });
+    return tr;
+  });
+  if (!n) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = COLS.length; td.className = 'empty'; td.textContent = 'Click the map to add waypoints, or paste rows here (Ctrl+V).'; tr.append(td); rows.push(tr); }
+  $('wps').replaceChildren(...rows);
+  const act = $('wps').querySelector('td.act');
+  if (act && act.scrollIntoView) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  let dist = 0;
+  for (let k = 1; k < plan.wps.length; k++) dist += Math.hypot(plan.wps[k].x - plan.wps[k - 1].x, plan.wps[k].z - plan.wps[k - 1].z);
+  const end = pred.time[plan.wps.length - 1];
+  $('tot').textContent = plan.wps.length > 1 ? `${(dist / 1000).toFixed(1)} km, about ${fmtTime(end)} flown (${af().name}). MISS = closest the predicted path passes; amber over 1 km: slow down or round the corner with more waypoints.` : '';
+}
+// write a number (or an empty cell) into editable cells; one undo step
+function write(targets, text) {
+  const v = num(text), blank = String(text).trim() === '';
+  if (!blank && isNaN(v)) return say(`'${text}' isn't a number.`);
+  snapshot();
+  for (const [r, c] of targets) {
+    const col = COLS[c], w = plan.wps[r];
+    if (!w || col.ro) continue;
+    if (blank) { if (col.clear) col.clear(w); } else col.set(w, v);
+  }
+  update();
+}
+function move(dr, dc, extend) {
+  cur = { r: clamp(cur.r + dr, 0, Math.max(plan.wps.length - 1, 0)), c: clamp(cur.c + dc, 0, COLS.length - 1) };
+  if (!extend) anc = { ...cur };
+  grid(); draw();
+}
+function edit(initial) {
+  if (!plan.wps.length || COLS[cur.c].ro) return;
+  const td = $('wps').querySelector('td.act');
+  if (!td) return;
+  const input = document.createElement('input');
+  if (COLS[cur.c].keypad) input.inputMode = 'decimal'; // touch: number keypad (E/N KM keep the full keyboard for the minus sign)
+  input.value = initial ?? String(COLS[cur.c].get(plan.wps[cur.r], cur.r));
+  td.replaceChildren(input);
+  editing = input;
+  input.focus();
+  if (initial === undefined) input.select();
+  let done = false;
+  const finish = (save, fill, dr, dc) => {
+    if (done) return; done = true; editing = null;
+    if (save) write(fill ? cells() : [[cur.r, cur.c]], input.value); else grid();
+    if (dr || dc) move(dr, dc, false);
+    $('grid').focus();
+  };
+  input.onkeydown = e => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); finish(true, e.ctrlKey || e.metaKey, e.ctrlKey || e.metaKey ? 0 : e.shiftKey ? -1 : 1, 0); }
+    else if (e.key === 'Tab') { e.preventDefault(); finish(true, false, 0, e.shiftKey ? -1 : 1); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  };
+  input.onblur = () => finish(true, false);
+}
+const gridEl = $('grid');
+gridEl.addEventListener('mousedown', e => {
+  const td = e.target.closest('td[data-r]');
+  if (!td || editing) return;
+  const p = { r: +td.dataset.r, c: +td.dataset.c };
+  cur = p; if (!e.shiftKey) anc = { ...p };
+  dragSel = true; e.preventDefault(); gridEl.focus(); grid(); draw();
+});
+gridEl.addEventListener('mouseover', e => {
+  const td = e.target.closest('td[data-r]');
+  if (!dragSel || !td || !(e.buttons & 1)) return;
+  cur = { r: +td.dataset.r, c: +td.dataset.c }; grid(); draw();
+});
+addEventListener('mouseup', () => { dragSel = false; });
+gridEl.addEventListener('dblclick', e => { if (e.target.closest('td[data-r]')) edit(); });
+// Touch / pen: one tap edits the cell. The focus has to happen inside the tap for the on-screen keyboard to open,
+// and pointerup comes before the emulated mousedown (which then sees `editing` and leaves the box alone).
+gridEl.addEventListener('pointerup', e => {
+  const td = e.pointerType !== 'mouse' && !editing && e.target.closest('td[data-r]');
+  if (!td) return;
+  cur = anc = { r: +td.dataset.r, c: +td.dataset.c };
+  grid(); draw();
+  edit();
+});
+gridEl.addEventListener('keydown', e => {
+  if (editing) return;
+  const ctrl = e.ctrlKey || e.metaKey, k = e.key;
+  const arrows = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+  if (arrows[k]) { e.preventDefault(); move(...arrows[k], e.shiftKey); }
+  else if (k === 'Tab') { e.preventDefault(); move(0, e.shiftKey ? -1 : 1, false); }
+  else if (k === 'Enter' || k === 'F2') { e.preventDefault(); edit(); }
+  else if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); write(cells(), ''); }
+  else if (ctrl && k.toLowerCase() === 'a') { e.preventDefault(); anc = { r: 0, c: 0 }; cur = { r: Math.max(plan.wps.length - 1, 0), c: COLS.length - 1 }; grid(); draw(); }
+  else if (!ctrl && !e.altKey && k.length === 1) { e.preventDefault(); edit(k); }
+});
+// clipboard as tab-separated text, which Excel and Sheets read and write
+document.addEventListener('copy', e => {
+  if (document.activeElement !== gridEl || !plan.wps.length) return;
+  const s = sel(), lines = [];
+  for (let r = s.r0; r <= s.r1; r++) { const row = []; for (let c = s.c0; c <= s.c1; c++) row.push(String(COLS[c].get(plan.wps[r], r))); lines.push(row.join('\t')); }
+  e.clipboardData.setData('text/plain', lines.join('\n')); e.preventDefault();
+  say(`Copied ${s.r1 - s.r0 + 1} x ${s.c1 - s.c0 + 1} cells.`);
+});
+document.addEventListener('paste', e => {
+  if (document.activeElement !== gridEl) return;
+  e.preventDefault();
+  const rows = e.clipboardData.getData('text/plain').replace(/\r/g, '').split('\n');
+  while (rows.length && rows[rows.length - 1] === '') rows.pop();
+  if (!rows.length) return;
+  const block = rows.map(r => r.split('\t'));
+  if (block.length === 1 && block[0].length === 1 && cells().length > 1) return write(cells(), block[0][0]); // one value over a selection: fill it
+  snapshot();
+  const s = sel(), c0 = plan.wps.length ? s.c0 : 1; // into an empty plan, a pasted block starts at E KM
+  const r0 = plan.wps.length ? s.r0 : 0;
+  let skipped = 0;
+  block.forEach((cellsIn, i) => {
+    const r = r0 + i;
+    if (r >= plan.wps.length) { const last = plan.wps[plan.wps.length - 1]; plan.wps.push(last ? { ...last } : { x: 0, z: 0, h: 60, s: null }); }
+    cellsIn.forEach((text, j) => {
+      const col = COLS[c0 + j], w = plan.wps[r];
+      if (!col || col.ro) return;
+      const v = num(text);
+      if (String(text).trim() === '') { if (col.clear) col.clear(w); }
+      else if (isNaN(v)) skipped++; else col.set(w, v);
+    });
+  });
+  anc = { r: r0, c: c0 }; cur = { r: r0 + block.length - 1, c: Math.min(c0 + Math.max(...block.map(b => b.length)) - 1, COLS.length - 1) };
+  update();
+  say(`Pasted ${block.length} row(s)${skipped ? `, ${skipped} cell(s) weren't numbers and were skipped` : ''}.`);
+});
+$('insRow').onclick = () => {
+  snapshot();
+  const w = plan.wps, r = cur.r;
+  const at = w.length ? r : 0, a = w[at - 1], b = w[at];
+  const nw = a && b ? { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, h: a.h, s: a.s } : b ? { x: b.x - 1000, z: b.z, h: b.h, s: b.s } : { x: view.x, z: view.z, h: 60, s: null };
+  w.splice(at, 0, nw); anc = cur = { r: at, c: cur.c }; update();
+};
+$('delRows').onclick = () => {
+  if (!plan.wps.length) return;
+  snapshot();
+  const s = sel(); plan.wps.splice(s.r0, s.r1 - s.r0 + 1); anc = cur = { r: s.r0, c: cur.c }; update();
+};
+
+function update() {
+  pred = predict(plan.wps, af(), set, plan.start);
+  $('afSel').value = plan.airframe; $('v0').value = Math.round(plan.start * U.sk); $('name').value = plan.name;
+  grid(); draw(); store.set('fp-current', plan);
+}
+
+// ---- mouse ----
+let hover = -1, drag = null, pinch = null, press = 0, touch = false;
+const pts = new Map(); // pointers down on the map, for pinch
+const fat = () => touch ? 2 : 1; // fingers get twice the hit radius
+const pos = e => { const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1; return [(e.clientX - r.left) * d, (e.clientY - r.top) * d]; };
+const hitWp = ([px, py]) => plan.wps.findIndex(w => Math.hypot(sx(w.x) - px, sy(w.z) - py) < 12 * fat() * (devicePixelRatio || 1));
+const pair = () => { const [a, b] = pts.values(); return { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; };
+function segDist(px, py, ax, ay, bx, by) {
+  const lx = bx - ax, ly = by - ay, l2 = lx * lx + ly * ly, t = l2 ? clamp(((px - ax) * lx + (py - ay) * ly) / l2, 0, 1) : 0;
+  return Math.hypot(px - ax - t * lx, py - ay - t * ly);
+}
+function addAt([px, py]) {
+  snapshot();
+  const d = devicePixelRatio || 1, w = plan.wps;
+  for (let k = 1; k < w.length; k++)
+    if (segDist(px, py, sx(w[k - 1].x), sy(w[k - 1].z), sx(w[k].x), sy(w[k].z)) < 8 * fat() * d) {
+      w.splice(k, 0, { x: wx(px), z: wz(py), h: w[k - 1].h, s: w[k - 1].s });
+      return update();
+    }
+  const last = w[w.length - 1];
+  w.push({ x: wx(px), z: wz(py), h: last ? last.h : 60, s: last ? last.s : null });
+  update();
+}
+function endDrag() { // keep a moved waypoint, forget the undo step of one that wasn't
+  if (drag && drag.k >= 0) { if (drag.moved) update(); else undo.pop(); }
+  drag = null;
+}
+cv.addEventListener('pointerdown', e => {
+  touch = e.pointerType === 'touch'; // before the button check, so a mouse right-click clears it
+  if (e.button !== 0) return;
+  const p = pos(e);
+  pts.set(e.pointerId, p);
+  cv.setPointerCapture(e.pointerId);
+  clearTimeout(press);
+  if (pts.size === 2) { // second finger: pinch zoom instead of the drag
+    endDrag();
+    const { d, m } = pair();
+    pinch = { d, s: view.s, g: [wx(m[0]), wz(m[1])] };
+    return;
+  }
+  if (pinch || pts.size > 2) return;
+  const k = hitWp(p);
+  drag = { k, start: p, last: p, moved: false };
+  if (k >= 0) {
+    snapshot(); anc = cur = { r: k, c: cur.c }; grid(); // a waypoint clicked on the map selects its row
+    // long-press a waypoint = right-click: delete it (iOS sends no contextmenu); the snapshot above is its undo
+    if (touch) press = setTimeout(() => { if (drag && !drag.moved) { plan.wps.splice(drag.k, 1); drag = null; hover = -1; update(); } }, 500);
+  }
+});
+cv.addEventListener('pointermove', e => {
+  const p = pos(e);
+  if (pts.has(e.pointerId)) pts.set(e.pointerId, p);
+  if (pinch) {
+    if (pts.size < 2) return;
+    const { d, m } = pair();
+    view.s = clamp(pinch.s * d / pinch.d, 1e-5, 2);
+    view.x = pinch.g[0] - (m[0] - cv.width / 2) / view.s; view.z = pinch.g[1] + (m[1] - cv.height / 2) / view.s; // the pinched point stays under the fingers
+    return draw();
+  }
+  if (!drag) { const h = hitWp(p); if (h !== hover) { hover = h; draw(); } return; }
+  if (Math.hypot(p[0] - drag.start[0], p[1] - drag.start[1]) > 4 * fat() * (devicePixelRatio || 1)) { drag.moved = true; clearTimeout(press); }
+  if (drag.k >= 0) { const w = plan.wps[drag.k]; w.x = wx(p[0]); w.z = wz(p[1]); pred = { path: [], time: [], miss: [] }; draw(); }
+  else { view.x -= (p[0] - drag.last[0]) / view.s; view.z += (p[1] - drag.last[1]) / view.s; draw(); }
+  drag.last = p;
+});
+cv.addEventListener('pointerup', e => {
+  pts.delete(e.pointerId); clearTimeout(press);
+  if (pinch) { if (!pts.size) pinch = null; return; } // no waypoint from the last finger of a pinch
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (d.k >= 0) { if (!d.moved) undo.pop(); update(); }
+  else if (!d.moved) addAt(pos(e));
+});
+cv.addEventListener('pointercancel', e => { pts.delete(e.pointerId); clearTimeout(press); if (!pts.size) pinch = null; endDrag(); });
+cv.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (touch) return; // long-press is handled on pointerdown
+  const k = hitWp(pos(e));
+  if (k >= 0) { snapshot(); plan.wps.splice(k, 1); hover = -1; update(); }
+});
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const p = pos(e), k = hitWp(p), dir = -Math.sign(e.deltaY || e.deltaX); // Shift+wheel arrives as a sideways scroll in most browsers
+  if (k >= 0) {
+    snapshot();
+    const w = plan.wps[k];
+    if (e.shiftKey) w.s = Math.max(set.minSpeed, (w.s || plan.start) + dir * U.sstep);
+    else w.h = Math.max(MIN_H, w.h + dir * U.hstep);
+    return update();
+  }
+  const gx = wx(p[0]), gz = wz(p[1]), f = dir > 0 ? 1.25 : 0.8;
+  view.s = clamp(view.s * f, 1e-5, 2);
+  view.x = gx - (p[0] - cv.width / 2) / view.s; view.z = gz + (p[1] - cv.height / 2) / view.s;
+  draw();
+}, { passive: false });
+addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'z' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); doUndo(); } });
+function doUndo() { const s = undo.pop(); if (s) { plan.wps = JSON.parse(s); update(); } }
+$('undo').onclick = doUndo;
+$('min').onclick = () => $('side').classList.toggle('min');
+
+// ---- plans: browser storage, files, the jet ----
+const saved = () => store.get('fp-plans', {});
+function listPlans() { const p = saved(); $('plans').replaceChildren(...Object.keys(p).sort().map(n => new Option(`${n} (${p[n].map || '?'}, ${p[n].wps.length} wp)`, n))); }
+function usePlan(p, why) {
+  if (!p || !Array.isArray(p.wps) || p.wps.some(w => !isFinite(w.x) || !isFinite(w.z) || !isFinite(w.h))) return say('Not a flight plan.');
+  snapshot();
+  plan = { v: 1, name: p.name || '', map: p.map || plan.map, airframe: p.airframe || plan.airframe, start: p.start > 0 ? p.start : plan.start, wps: p.wps.map(w => ({ x: +w.x, z: +w.z, h: +w.h, s: w.s > 0 ? +w.s : null })) };
+  if (plan.map && plan.map !== (DATA.map && DATA.map.name)) loadMap(plan.map);
+  update(); fit(); say(why);
+}
+$('save').onclick = () => {
+  const n = $('name').value.trim();
+  if (!n) return say('Name the plan first.');
+  plan.name = n; const p = saved(); p[n] = plan; store.set('fp-plans', p); listPlans(); $('plans').value = n; say(`Saved '${n}' in this browser.`);
+};
+$('name').onchange = () => { plan.name = $('name').value.trim(); store.set('fp-current', plan); };
+$('load').onclick = () => { const n = $('plans').value; if (n) usePlan(saved()[n], `Loaded '${n}'.`); };
+$('del').onclick = () => { const n = $('plans').value; if (n && confirm(`Delete '${n}'?`)) { const p = saved(); delete p[n]; store.set('fp-plans', p); listPlans(); } };
+$('new').onclick = () => { snapshot(); plan.wps = []; plan.name = ''; update(); };
+$('export').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(plan, null, 1)], { type: 'application/json' }));
+  a.download = `${(plan.name || 'flight-plan').replace(/[^\w-]+/g, '_')}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$('import').onclick = () => $('file').click();
+$('file').onchange = () => {
+  const f = $('file').files[0]; if (!f) return;
+  f.text().then(t => usePlan(JSON.parse(t), `Imported ${f.name}.`)).catch(() => say('Not a flight plan file.'));
+  $('file').value = '';
+};
+if (location.protocol.startsWith('http')) { // served by the game's web mirror: talk to the jet
+  $('jet').hidden = false;
+  $('send').onclick = () => {
+    if (!plan.wps.length) return say('No waypoints.');
+    const d = plan.wps.map(w => [w.x.toFixed(0), w.z.toFixed(0), w.h.toFixed(1), w.s ? w.s.toFixed(1) : ''].join(',')).join(';');
+    fetch(`/plan?d=${encodeURIComponent(d)}`).then(r => say(r.ok ? 'Sent: the route is loaded. In the jet, press NAV (and engage the A/T for the speeds).' : 'The game refused the plan.')).catch(() => say('Game not reachable.'));
+  };
+  $('fetch').onclick = () => fetch('/route').then(r => r.json()).then(r => usePlan({ name: plan.name, map: plan.map, wps: r.wps }, `Loaded ${r.wps.length} waypoints from the jet.`)).catch(() => say('Game not reachable.'));
+}
+
+// ---- start ----
+listPlans();
+const lastPlan = store.get('fp-current', null);
+if (lastPlan && Array.isArray(lastPlan.wps)) plan = Object.assign(plan, lastPlan);
+loadMap(plan.map && DATA.maps.includes(plan.map) ? plan.map : store.get('fp-map', DATA.maps[0]));
+update();
+</script></body></html>
