@@ -41,6 +41,9 @@ namespace AutopilotMod
         RdrRcsOwn,
         ModeNav,
         WptClear,
+        RdrEyes,
+        RdrSam,
+        RdrAvoid,
 
         // A/P MFD settings page
         SetPage,

@@ -25,6 +25,7 @@ namespace AutopilotMod
         private FlightController ap;
         private MfdPage mfd;
         private RadarCoveragePage radarPage;
+        private GunHeatPage gunHeat;
         private WebMirror mirror;
         private DisconnectTone tone;
         private Harmony harmony;
@@ -53,7 +54,8 @@ namespace AutopilotMod
             gpws = new TerrainWarning(cfg, gameObject, sounds, Logger);
             mfd = new MfdPage(cfg, ap, gpws);
             radarPage = new RadarCoveragePage(cfg, ap);
-            mirror = new WebMirror(cfg, Logger, Report, ap, mfd, radarPage);
+            gunHeat = new GunHeatPage(cfg, Logger);
+            mirror = new WebMirror(cfg, Logger, Report, ap, mfd, radarPage, gunHeat);
             FlightPlanner.Init(Logger, cfg);
             ap.ApDisconnected += () =>
             {
@@ -137,6 +139,7 @@ namespace AutopilotMod
                 holdCmd = ApCommand.None;
                 SetCursorMode(false);
             }
+            gunHeat.Tick(Flying ? aircraft : null);
             if (aircraft == null) return;
 
             if (!Flying)
@@ -318,6 +321,9 @@ namespace AutopilotMod
                 case ApCommand.RdrRcsUp:
                 case ApCommand.RdrRcsDown:
                 case ApCommand.RdrRcsOwn:
+                case ApCommand.RdrEyes:
+                case ApCommand.RdrSam:
+                case ApCommand.RdrAvoid:
                     radarPage.Command(cmd);
                     break;
                 case ApCommand.Hide:
@@ -359,6 +365,7 @@ namespace AutopilotMod
             if (gpws.Active)
                 mfd.DrawPullUp();
             if (radarPage.Visible) radarPage.OnGUI(cmd => Execute(cmd, false));
+            if (cfg.MfdVisible.Value && gunHeat.Visible) gunHeat.OnGUI(cmd => { });
             if (cfg.MfdVisible.Value)
                 mfd.OnGUI(cmd =>
                 {

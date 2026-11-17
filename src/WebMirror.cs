@@ -49,6 +49,7 @@ namespace AutopilotMod
         private readonly Action<string, bool> report;
         private readonly FlightController ap;
         private readonly RadarCoveragePage map;
+        private readonly GunHeatPage gunHeat;
         private readonly MfdFrame[] pages;
         private readonly RenderTexture[] rts;
         // Encoded frames live in a few reused buffers per page (no per-frame garbage: a GC pass over
@@ -88,14 +89,15 @@ namespace AutopilotMod
         // thread pool, so it never competes with the game's worker threads.
         private readonly BlockingCollection<Action> encodeJobs = new BlockingCollection<Action>();
 
-        public WebMirror(ApSettings cfg, ManualLogSource log, Action<string, bool> report, FlightController ap, MfdPage apPage, RadarCoveragePage map)
+        public WebMirror(ApSettings cfg, ManualLogSource log, Action<string, bool> report, FlightController ap, MfdPage apPage, RadarCoveragePage map, GunHeatPage gunHeat)
         {
             this.cfg = cfg;
             this.log = log;
             this.report = report;
             this.ap = ap;
             this.map = map;
-            pages = new MfdFrame[] { apPage, map };
+            this.gunHeat = gunHeat;
+            pages = new MfdFrame[] { apPage, map, gunHeat };
             rts = new RenderTexture[pages.Length];
             frames = new Frame[pages.Length][];
             current = new Frame[pages.Length];
@@ -129,13 +131,13 @@ namespace AutopilotMod
 
         /// <summary>
         /// Page 0, the A/P MFD: square. Page 1, the map: bezel-less at the browser window's shape,
-        /// MapResolution on its long side. Both fit inside the game window.
+        /// MapResolution on its long side. Page 2, gun heat: square, half the A/P's size. All fit inside the game window.
         /// </summary>
         private Vector2Int Size(int page)
         {
-            if (page == 0)
+            if (page != 1)
             {
-                int s = Mathf.Clamp(cfg.MirrorResolution.Value, 256, Mathf.Min(Screen.width, Screen.height));
+                int s = Mathf.Clamp(cfg.MirrorResolution.Value / (page == 2 ? 2 : 1), 256, Mathf.Min(Screen.width, Screen.height));
                 return new Vector2Int(s, s);
             }
             float a = mapAspect, l = cfg.MirrorMapResolution.Value;
@@ -253,7 +255,7 @@ namespace AutopilotMod
             {
                 nextTargets = Time.unscaledTime + 0.25f;
                 // built in two halves: a failure in one (logged once) leaves the other on the page
-                targetsJson = "{\"t\":" + Safely(TargetPanel.Json, "{\"filters\":[],\"selected\":[],\"contacts\":[]}") + ",\"m\":" + Safely(map.Json, "{\"wps\":[]}") + "}";
+                targetsJson = "{\"t\":" + Safely(TargetPanel.Json, "{\"filters\":[],\"selected\":[],\"contacts\":[]}") + ",\"m\":" + Safely(map.Json, "{\"wps\":[]}") + ",\"g\":" + (gunHeat.Visible ? "true" : "false") + "}";
             }
         }
 
@@ -734,6 +736,8 @@ img{display:block;touch-action:none;user-select:none;-webkit-user-drag:none;back
 .win.min>:not(.bar){display:none}
 #ap{left:8px;top:8px}
 #m0{width:var(--s,360px);height:var(--s,360px)}
+#gh{left:8px;top:400px}
+#m2{width:var(--s,180px);height:var(--s,180px)}
 #cp{right:8px;top:8px;width:min(360px,calc(100vw - 16px))}
 #cp .body{overflow-y:auto;padding:4px 8px 8px}
 .row{margin:0 0 4px}
@@ -760,16 +764,18 @@ input{font:inherit;width:9ch;margin:1px;padding:3px 5px;min-height:20px;backgrou
 <img id=""m1"" alt=""Radar coverage map""><canvas id=""mc"" hidden></canvas>
 <div id=""ap"" class=""win""><div class=""bar""><span>A/P</span><button class=""act"" data-z=""0.87"" title=""Smaller"">&minus;</button><button class=""act"" data-z=""1.15"" title=""Bigger"">+</button><button class=""act mn"" title=""Minimise"">_</button></div>
 <img id=""m0"" alt=""A/P MFD""></div>
+<div id=""gh"" class=""win"" hidden><div class=""bar""><span>GUN HEAT</span><button class=""act"" data-z=""0.87"" title=""Smaller"">&minus;</button><button class=""act"" data-z=""1.15"" title=""Bigger"">+</button><button class=""act mn"" title=""Minimise"">_</button></div>
+<img id=""m2"" alt=""Gun heat""></div>
 <div id=""cp"" class=""win""><div class=""bar""><span>MAP / ROUTE / TARGETS</span><button class=""act mn"" title=""Minimise"">_</button></div><div class=""body"">
 <span class=""gh"">RADARS SHOWN &middot; TARGET HEIGHT</span>
-<div class=""row""><button data-c=""RdrAll"" data-m=""ALL"">ALL</button><button data-c=""RdrOwn"" data-m=""OWN"">OWN</button><button data-c=""RdrEnemy"" data-m=""ENMY"">ENMY</button><button class=""act"" data-c=""RdrTgt"" id=""tgt"">TGT</button></div>
+<div class=""row""><button data-c=""RdrAll"" data-m=""ALL"">ALL</button><button data-c=""RdrOwn"" data-m=""OWN"">OWN</button><button data-c=""RdrEnemy"" data-m=""ENMY"">ENMY</button><button class=""act"" data-c=""RdrTgt"" id=""tgt"">TGT</button><button data-c=""RdrEyes"" id=""eyes"" title=""Visual spotting coverage"">EYES</button><button data-c=""RdrSam"" id=""sam"" title=""Anti-air engagement rings"">SAM</button></div>
 <div class=""row""><button data-c=""RdrFollow"" id=""folw"">FOLLOW JET</button><button class=""act"" data-c=""RdrMap"">WHOLE MAP</button><button class=""act"" data-c=""RdrZoomOut"">&minus;</button><span id=""rng""></span><button class=""act"" data-c=""RdrZoomIn"">+</button></div>
 <div class=""row"">COVERAGE OPACITY <input id=""opa"" type=""range"" min=""0"" max=""1"" step=""0.05"" style=""width:14ch;vertical-align:middle""></div>
 <span class=""gh"">TARGET RCS: ALL/OWN &middot; ENMY (0 = OWN JET) &middot; NOW <span id=""rcs""></span></span>
 <div class=""row""><input id=""rcsf"" type=""number"" min=""0"" max=""1000"" step=""any"" value=""1""><button class=""act"" data-r=""rcsf"">SET</button><button class=""act"" data-r=""rcsf"" data-own>OWN</button>
 &nbsp;<input id=""rcse"" type=""number"" min=""0"" max=""1000"" step=""any"" value=""0""><button class=""act"" data-r=""rcse"">SET</button><button class=""act"" data-r=""rcse"" data-own>OWN</button></div>
 <span class=""gh"">ROUTE &middot; RIGHT-CLICK MAP: ADD / INSERT ON LINE / DELETE &middot; HEIGHT: WHEEL OVER A WAYPOINT &middot; SPEED: SHIFT+WHEEL &middot; OR TYPE BELOW + ENTER (SPEED 0 = NONE)</span>
-<div class=""row""><button data-c=""ModeNav"" id=""nav"">NAV</button><button class=""act"" data-c=""WptClear"">CLEAR ROUTE</button><button class=""act"" onclick=""window.open('/planner/')"">FLIGHT PLANNER</button><span id=""eta""></span></div>
+<div class=""row""><button data-c=""ModeNav"" id=""nav"">NAV</button><button class=""act"" data-c=""WptClear"">CLEAR ROUTE</button><button class=""act"" data-c=""RdrAvoid"" id=""avoid"" title=""Re-plan each leg around what the enemy sees (switches the map to ENMY)"">AVOID THREATS</button><button class=""act"" onclick=""window.open('/planner/')"">FLIGHT PLANNER</button><span id=""eta""></span></div>
 <div id=""stale"" class=""row"" style=""color:#ffbd33"" hidden>NO DATA FROM GAME - IS IT RUNNING? RELOAD THIS PAGE IF THIS STAYS</div>
 <table class=""wpt""><thead><tr><th>#</th><th>DIST</th><th>HEIGHT <span id=""hu""></span></th><th>SPEED <span id=""su""></span></th><th></th></tr></thead><tbody id=""wps""></tbody></table>
 <div id=""flt""></div>
@@ -801,11 +807,13 @@ function refresh() {
     if (t === last) return;
     last = t;
     const all = JSON.parse(t), s = all.t, m = all.m;
+    if ($('gh').hidden === !!all.g) { $('gh').hidden = !all.g; loads[2](); } // only in jets whose gun can overheat
     for (const b of document.querySelectorAll('button[data-m]')) b.className = b.dataset.m === m.mode ? 'on' : '';
     $('tgt').textContent = m.tgt; $('folw').className = m.folw ? 'on' : 'act';
     $('rng').textContent = `RNG ${m.rng} KM`; $('rcs').textContent = m.rcs;
     if (document.activeElement !== $('opa')) $('opa').value = m.opa;
     $('nav').className = m.nav ? 'nav' : 'act'; $('eta').textContent = m.eta;
+    $('eyes').className = m.eyes ? 'on' : ''; $('sam').className = m.sam ? 'on' : ''; $('avoid').className = m.avoid ? 'on' : 'act';
     routeList(m);
     const flt = $('flt');
     flt.replaceChildren();
@@ -881,12 +889,12 @@ setInterval(() => {
 const tab = Math.random().toString(36).slice(2, 12); // lets the game end this tab's older streams
 // The map is drawn here from the game's data (webMap); MapAsVideo = true in the game's config streams it as JPEG instead.
 const MAP_VIDEO = __MAPVIDEO__;
-// streams: the map is rendered at the window's shape; a minimised A/P window stops its stream (the game stops rendering it)
+// streams: the map is rendered at the window's shape; a minimised or hidden window stops its stream (the game stops rendering it)
 const loads = [];
-for (const p of MAP_VIDEO ? [0, 1] : [0]) {
-  const img = $('m' + p);
+for (const p of MAP_VIDEO ? [0, 1, 2] : [0, 2]) {
+  const img = $('m' + p), win = img.closest('.win');
   const load = loads[p] = () => {
-    if (p === 0 && $('ap').classList.contains('min')) return img.removeAttribute('src');
+    if (win && (win.hidden || win.classList.contains('min'))) return img.removeAttribute('src');
     img.src = `/stream?p=${p}&c=${tab}&a=${(innerWidth / innerHeight).toFixed(3)}&t=${Date.now()}`;
   };
   img.onerror = () => setTimeout(load, 1000);
@@ -928,9 +936,10 @@ for (const w of document.querySelectorAll('.win')) {
     bar.onpointermove = m => place(m.clientX - ox, m.clientY - oy);
     bar.onpointerup = () => { bar.onpointermove = bar.onpointerup = null; save(); };
   });
-  w.querySelector('.mn').onclick = () => { w.classList.toggle('min'); save(); if (w.id === 'ap') loads[0](); };
+  const img = w.querySelector('img');
+  w.querySelector('.mn').onclick = () => { w.classList.toggle('min'); save(); if (img) loads[img.id.slice(1)](); };
   for (const z of w.querySelectorAll('[data-z]')) z.onclick = () => {
-    const s = clamp($('m0').offsetWidth * z.dataset.z, 160, innerHeight - 40);
+    const s = clamp(img.offsetWidth * z.dataset.z, 120, innerHeight - 40);
     w.style.setProperty('--s', s + 'px'); save();
   };
 }
@@ -964,17 +973,19 @@ function webMap() {
     document.head.append(s);
   }
 
-  // overlay: header (x, z, half-width, opacity, enemy view), then (state, count) runs from the south row up
+  // overlay: header (x, z, half-width, opacity, enemy view), then (state, count) runs from the south row up;
+  // states 0 none, 1 masked, 2 RWR only (enemy view), 3 eyes, 4 radar - coloured as the game's page
   function decodeOverlay(buf) {
     const dv = new DataView(buf), op = dv.getFloat32(12, true), en = dv.getInt32(16, true);
-    const cov = [...COV, Math.floor(op * 0.73 * 255)], mask = [...MASK, Math.floor(op * 255)];
-    const seen = en ? mask : cov, hidden = en ? cov : mask; // enemy view: seen by them is the danger
+    const a = f => Math.floor(Math.min(1, op * f) * 255);
+    const pal = en // enemy view: seen by them is the danger
+      ? [null, [...COV, a(0.73)], [255, 225, 60, a(0.6)], [255, 140, 30, a(1)], [...MASK, a(1)]]
+      : [null, [...MASK, a(1)], null, [70, 200, 255, a(0.85)], [...COV, a(0.73)]];
     const c = Object.assign(document.createElement('canvas'), { width: OV, height: OV }), g = c.getContext('2d');
     const im = g.createImageData(OV, OV), px = im.data;
     for (let o = 20, k = 0; o + 2 < buf.byteLength; o += 3) {
-      const v = dv.getUint8(o), n = dv.getUint16(o + 1, true);
-      if (!v) { k += n; continue; }
-      const col = v === 2 ? seen : hidden;
+      const v = dv.getUint8(o), n = dv.getUint16(o + 1, true), col = pal[v];
+      if (!col) { k += n; continue; }
       for (const e = k + n; k < e; k++) {
         const i = ((OV - 1 - Math.floor(k / OV)) * OV + k % OV) * 4;
         px[i] = col[0]; px[i + 1] = col[1]; px[i + 2] = col[2]; px[i + 3] = col[3];
@@ -1066,6 +1077,13 @@ function webMap() {
     if (ov) ctx.drawImage(ov.c, sx(ov.x - ov.r), sy(ov.z + ov.r), 2 * ov.r * k, 2 * ov.r * k);
 
     for (const [x, z, c] of st.sites || []) { ctx.fillStyle = SITE[c]; ctx.fillRect(sx(x) - 3 * dpr, sy(z) - 3 * dpr, 6 * dpr, 6 * dpr); }
+    // AA rings at their slant range: missiles solid, guns faint
+    ctx.lineWidth = Math.max(1.2, 0.0025 * S);
+    for (const [x, z, r, mis] of st.sams || []) {
+      ctx.globalAlpha = mis ? 1 : 0.5; ctx.strokeStyle = st.en ? RED : SITE[0];
+      ctx.beginPath(); ctx.arc(sx(x), sy(z), r * k, 0, 2 * Math.PI); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
 
     // contacts: the map's own icons, colours and headings; selected targets boxed
     const cs = Math.max(8, 0.016 * S);
@@ -1111,8 +1129,9 @@ function webMap() {
     const bh = 0.08 * H, by = H - bh / 2;
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, H - bh, W, bh);
     ctx.font = font(0.03, S); ctx.fillStyle = st.amber ? AMBER : GREEN; ctx.fillText(st.status || 'NO AIRCRAFT', 0.02 * W, by);
-    ctx.font = font(0.026, S); ctx.fillStyle = st.en ? RED : KEY_GREEN; ctx.fillText('SEEN', 0.5 * W, by);
-    ctx.textAlign = 'right'; ctx.fillStyle = st.en ? KEY_GREEN : RED; ctx.fillText('HIDDEN', 0.98 * W, by);
+    ctx.font = font(0.026, S);
+    const key = st.en ? [['RDR', RED], ['EYE', '#ff8c26'], ['RWR', '#ffe640'], ['HID', KEY_GREEN]] : [['RDR', KEY_GREEN], ['EYE', '#4dccff'], ['HID', RED]];
+    key.forEach(([t, c], i) => { ctx.fillStyle = c; ctx.fillText(t, (0.5 + i * 0.12) * W, by); });
   }
 
   // ---- mouse / touch: as on the game's map page ----

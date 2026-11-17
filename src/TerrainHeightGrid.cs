@@ -1,4 +1,7 @@
+using System.IO;
+using System.IO.Compression;
 using System.Threading;
+using System.Threading.Tasks;
 using Unity.Collections;
 using UnityEngine;
 
@@ -9,6 +12,7 @@ namespace AutopilotMod
     /// multi-threaded raycasts against the same Statics layer the game's radar line-of-sight uses.
     /// One covers the whole map, once (terrain never changes, so every radar profile then reads it
     /// for free); smaller, finer ones are made around the radar map's view when zoomed in.
+    /// The map's grid is cached on disk (UseCache): loaded on a worker next time instead of raycast.
     /// </summary>
     internal sealed class TerrainHeightGrid
     {
@@ -39,11 +43,73 @@ namespace AutopilotMod
             height = new ushort[N * N];
         }
 
+        private const int CacheFormat = 1;
+        private string cachePath, cacheKey;
+        private Task<bool> loading;
+
+        /// <summary>
+        /// Load the heights from <paramref name="path"/> on a worker if it holds this grid for <paramref name="key"/>
+        /// (Fill waits for it); otherwise Fill raycasts as usual and saves them there once done.
+        /// </summary>
+        public void UseCache(string path, string key)
+        {
+            cachePath = path;
+            cacheKey = key;
+            loading = Task.Run(() => Load());
+        }
+
+        // header: format, key, N, centre and size; then the heights (quarter-metres, little-endian ushort)
+        private bool Load()
+        {
+            if (!File.Exists(cachePath)) return false;
+            using (var r = new BinaryReader(new GZipStream(File.OpenRead(cachePath), CompressionMode.Decompress)))
+            {
+                if (r.ReadInt32() != CacheFormat || r.ReadString() != cacheKey || r.ReadInt32() != N
+                    || r.ReadSingle() != CX || r.ReadSingle() != CZ || r.ReadSingle() != Size) return false;
+                byte[] raw = r.ReadBytes(height.Length * 2);
+                if (raw.Length != height.Length * 2) return false; // cut short: raycast again
+                System.Buffer.BlockCopy(raw, 0, height, 0, raw.Length);
+                return true;
+            }
+        }
+
+        private void Save()
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(cachePath));
+            string tmp = cachePath + ".tmp"; // a crash mid-write leaves the old file (or none), never half of one
+            using (var w = new BinaryWriter(new GZipStream(File.Create(tmp), System.IO.Compression.CompressionLevel.Fastest)))
+            {
+                w.Write(CacheFormat);
+                w.Write(cacheKey);
+                w.Write(N);
+                w.Write(CX);
+                w.Write(CZ);
+                w.Write(Size);
+                var raw = new byte[height.Length * 2];
+                System.Buffer.BlockCopy(height, 0, raw, 0, raw.Length);
+                w.Write(raw);
+            }
+            if (File.Exists(cachePath)) File.Delete(cachePath);
+            File.Move(tmp, cachePath);
+        }
+
         /// <summary>Raycast the next batch of cells. Completed in the same frame, so a
         /// floating-origin shift can't land between scheduling and reading the hits.</summary>
         public void Fill()
         {
             if (Ready) return;
+            if (loading != null)
+            {
+                if (!loading.IsCompleted) return;
+                bool hit = loading.Status == TaskStatus.RanToCompletion && loading.Result;
+                if (loading.IsFaulted) UnityEngine.Debug.LogWarning($"Terrain cache {cachePath} unreadable, mapping again: {loading.Exception.InnerException.Message}");
+                loading = null;
+                if (hit)
+                {
+                    filled = height.Length;
+                    return;
+                }
+            }
             int count = Mathf.Min(BatchPerFrame, height.Length - filled);
             float sea = Datum.LocalSeaY;
             var query = new QueryParameters(PhysicsLayers.StaticsMask, false, QueryTriggerInteraction.Ignore, false);
@@ -65,6 +131,12 @@ namespace AutopilotMod
                     height[filled + k] = (ushort)Mathf.Clamp(Mathf.RoundToInt(h * QuarterMetre), 0, ushort.MaxValue);
                 }
                 filled += count;
+                if (Ready && cachePath != null)
+                    ThreadPool.QueueUserWorkItem(_ =>
+                    {
+                        try { Save(); }
+                        catch (System.Exception ex) { UnityEngine.Debug.LogWarning($"Can't save terrain cache {cachePath}: {ex.Message}"); }
+                    });
             }
             finally
             {

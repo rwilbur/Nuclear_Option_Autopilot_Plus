@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
@@ -25,6 +26,15 @@ namespace AutopilotMod
     /// of the RCS set (default: your own jet's), colours swapped: red = the enemy sees you there,
     /// green = hidden. A jammed radar (Radar.IsJammed: it detects nothing) adds no coverage; its
     /// site turns amber. Doppler and ECM are left out: without ECM they can't change the result.
+    /// ENMY also shows in yellow where an enemy radar paints you without detecting you: the game sends
+    /// the RWR warning (and the map ping) from every radar check that reaches you - out to 2x its range,
+    /// in its cone, above the horizon, in line of sight - before it looks at signal strength.
+    ///
+    /// EYES adds visual spotting (TargetDetector.VisualCheck): a detector sees a target closer than
+    /// min(visualRange, target visibility x magnification) in line of sight, if the target is no faster than
+    /// its maxSpeed. Cyan (friendly) / orange (enemy). The target is your own jet's visibility.
+    /// SAM draws anti-air rings (ALL: ours, ENMY: theirs), one per unit / battery: WeaponInfo.targetRequirements.maxRange (slant range), which the
+    /// game's turrets engage inside. AVOID re-plans the route's legs around what ENMY shows (ThreatRouter).
     ///
     ///            T1 ALL   T2 OWN   T3 ENMY  T4 TGT   T5 HIDE
     ///   L1 FOLW  +--------------------------------------+  R1 NAV
@@ -32,14 +42,16 @@ namespace AutopilotMod
     ///   L3 ^RCS  |  map + coverage (scroll = zoom,      |  R3 RNG
     ///   L4 RCS   |  drag = pan (on a waypoint: move it), right-click = waypoint) |  R4 v (zoom out)
     ///   L5 vRCS  +--------------------------------------+  R5 CLR WPT
+    ///            B1 EYES  B2 SAM            B4 AVOID
     ///   (L4 = back to own RCS)
     ///
     /// Under the coverage, the terrain is shaded (hillshade + 100 m contours) from the height grid.
     ///
     /// The map's terrain is raycast once into a TerrainHeightGrid. Each radar's polar profile
-    /// (Az bearings x Steps range bins) is read from that grid over a few frames, and redone when
-    /// the radar moves 2% of its range. The overlay is redrawn only when something changed, a few
-    /// radars per frame.
+    /// (Az bearings x Steps range bins) is read from that grid on a worker thread, and redone when
+    /// the radar moves 2% of its range. The overlay is redrawn only when something changed, also on
+    /// workers (line of sight, rasterising, colours, the web copy); the main thread only uploads it.
+    /// Workers run below normal priority so the game's own threads always come first.
     /// </summary>
     internal sealed class RadarCoveragePage : MfdFrame
     {
@@ -52,10 +64,14 @@ namespace AutopilotMod
 
         private static readonly AccessTools.FieldRef<Radar, float> RadarConeRef =
             AccessTools.FieldRefAccess<Radar, float>("radarCone");
+        private static readonly AccessTools.FieldRef<TargetDetector, float> EyeMaxSpeedRef =
+            AccessTools.FieldRefAccess<TargetDetector, float>("maxSpeed");
 
-        private static readonly Color32 Covered = new Color32(60, 230, 90, 95);
-        private static readonly Color32 Masked = new Color32(240, 50, 40, 130);
+        // Overlay states, in merge priority (a pixel keeps the highest any source gives it).
+        private const byte SNone = 0, SMasked = 1, SPainted = 2, SEye = 3, SRadar = 4;
         private static readonly Color32 None = new Color32(0, 0, 0, 0);
+        private static readonly Color KeyGreen = new Color(0.35f, 0.95f, 0.45f), KeyRed = new Color(1f, 0.3f, 0.25f),
+            KeyOrange = new Color(1f, 0.55f, 0.15f), KeyYellow = new Color(1f, 0.9f, 0.25f), KeyCyan = new Color(0.3f, 0.8f, 1f);
         private static readonly Color SiteCol = new Color(0.4f, 0.75f, 1f, 1f);
         private static readonly Color EnemySiteCol = new Color(1f, 0.3f, 0.25f, 1f);
         private static readonly Color LegendBack = new Color(0f, 0f, 0f, 0.6f);
@@ -76,6 +92,9 @@ namespace AutopilotMod
             new Osb { Side = Side.Right, Index = 3, Command = ApCommand.RdrZoomOut, Glyph = Glyph.Down },
             new Osb { Side = Side.Right, Index = 0, Command = ApCommand.ModeNav, Glyph = Glyph.Text },
             new Osb { Side = Side.Right, Index = 4, Command = ApCommand.WptClear, Glyph = Glyph.Text },
+            new Osb { Side = Side.Bottom, Index = 0, Command = ApCommand.RdrEyes, Glyph = Glyph.Text },
+            new Osb { Side = Side.Bottom, Index = 1, Command = ApCommand.RdrSam, Glyph = Glyph.Text },
+            new Osb { Side = Side.Bottom, Index = 3, Command = ApCommand.RdrAvoid, Glyph = Glyph.Text },
         };
 
         protected override Osb[] Buttons => RdrButtons;
@@ -90,15 +109,50 @@ namespace AutopilotMod
             public float ConePitch = float.NaN;   // enemy: antenna pitch while that heading is live, then the last one (deg); NaN = never known
             public float[] Height; // terrain height above sea level at each bin's far edge (m); null until the first sweep is done
             public float[] Before; // steepest terrain slope seen from the radar inside the bin, short of its far edge
-            public readonly byte[] Vis = new byte[Az * Steps];
-            public float VisAgl = float.NaN, VisRcs, VisRadius; // target Vis was computed for (VisAgl: height key); NaN = stale
+            public int Sweep;      // sweeps swapped in so far
 
-            // Sweep in progress: written into back buffers over several frames, then swapped in.
+            // build worker only: Vis and the sweep / target it was computed for (VisAgl: height key; NaN = stale)
+            public readonly byte[] Vis = new byte[Az * Steps];
+            public float VisAgl = float.NaN, VisRcs, VisRadius;
+            public int VisSweep;
+
+            // Sweep wanted (Pending) / running (Job): written into back buffers on a worker, then swapped in.
             public GlobalPosition NextOrigin;
             public float NextRange, NextAlt;
-            public int RaysDone = Az;
+            public bool Pending;
+            public Task Job;
             public float[] NextHeight, NextBefore; // rented from `spare` only while a sweep runs
         }
+
+        /// <summary>
+        /// One detector's visual coverage: a small polar line-of-sight table taken straight from the height
+        /// grid whenever it is needed (EyeAz x EyeSteps lookups), out to the range it spots the target at.
+        /// </summary>
+        private sealed class Eye
+        {
+            public GlobalPosition Origin;  // scan point (enemy: at the known position)
+            public float Alt, Range;       // scan point height above sea level; spotting range for the target (m)
+            public int Version;            // bumped when Origin / Alt / Range change
+            // build worker only: SEye / SMasked / SNone at each bin's far edge, and the version / target height key it is for
+            public readonly byte[] Vis = new byte[EyeAz * EyeSteps];
+            public float VisKey = float.NaN;
+            public int VisVersion;
+        }
+
+        private const int EyeAz = 360, EyeSteps = 128;
+        private readonly Dictionary<TargetDetector, Eye> eyes = new Dictionary<TargetDetector, Eye>();
+        private readonly Dictionary<Unit, TargetDetector[]> detectorsOf = new Dictionary<Unit, TargetDetector[]>();
+
+        /// <summary>An anti-air weapon's engagement ring: slant range from the unit (m).</summary>
+        private struct Ring
+        {
+            public float X, Z, Y, Max, Min;
+            public bool Missile;
+        }
+
+        private readonly List<Ring> rings = new List<Ring>();      // every enemy AA weapon (AVOID)
+        private readonly List<Ring> shownRings = new List<Ring>(); // the ones drawn (ShowRing)
+        private readonly Dictionary<Unit, Ring[]> ringsOf = new Dictionary<Unit, Ring[]>(); // per unit: its weapons' ranges, no position
 
         // Back buffers are shared: a radar holds a pair only during its sweep, which halves the
         // memory the profiles keep (about 5 MB per radar instead of 10 MB).
@@ -106,7 +160,20 @@ namespace AutopilotMod
 
         private static float[] Rent() => spare.Count > 0 ? spare.Pop() : new float[Az * Steps];
 
-        private const int SampleBudget = 50000; // terrain lookups per frame for profile sweeps
+        // Replaced profiles' arrays: a running build or AVOID may still read them, so they go back to `spare` only after.
+        private readonly List<float[]> retired = new List<float[]>();
+
+        // Radar work runs on at most this many pool threads (a quarter of the cores), below normal priority.
+        private static readonly int Workers = Mathf.Clamp(Environment.ProcessorCount / 4, 1, 4);
+
+        private static void Background(Action work)
+        {
+            Thread t = Thread.CurrentThread;
+            System.Threading.ThreadPriority was = t.Priority;
+            t.Priority = System.Threading.ThreadPriority.BelowNormal;
+            try { work(); }
+            finally { t.Priority = was; }
+        }
 
         private readonly ApSettings cfg;
         private readonly FlightController ap;
@@ -131,14 +198,36 @@ namespace AutopilotMod
             dirty = true;
         }
 
-        // The overlay is rasterised a few radars per frame into `state`, then uploaded in one go.
-        private const int PixelBudget = 160000;
-        private const int ViewshedCost = 80000;     // one line-of-sight pass, in pixels of that budget
-        private readonly List<Profile> building = new List<Profile>();
-        private int buildIdx;
-        private bool buildActive;
+        // The overlay is built on workers from a snapshot taken on the main thread (StartBuild), into
+        // `state` and `pixels`, then uploaded in one go (FinishBuild). Nothing here changes while it runs.
+        private struct RadarSrc
+        {
+            public Profile P;
+            public float[] Height, Before;
+            public float Ox, Oz, Alt, Range;
+            public int Sweep;
+            public Cone Cone;
+            public RadarParams Rp;
+        }
+
+        private struct EyeSrc
+        {
+            public Eye E;
+            public float Ox, Oz, Alt, Range;
+            public int Version;
+        }
+
+        private const int Band = 32; // texture rows per parallel work item
+        private readonly List<RadarSrc> building = new List<RadarSrc>();
+        private readonly List<EyeSrc> buildingEyes = new List<EyeSrc>(); // rasterised after the radars
+        private Task buildJob;
+        private bool buildActive => buildJob != null;
         private float bX, bZ, bR;                    // view being built
         private bool bEnemy;
+        private float bAgl, bTgtAsl, bHKey, bRcs, bRadius, bOpacity; // target and opacity being built for
+        private TerrainHeightGrid bGrid;
+        private Color32[] bPal;
+        private byte[] bEncoded;                     // the build's overlay for the web page
 
         private readonly byte[] state = new byte[Tex * Tex]; // 0 none, 1 masked, 2 covered
         private readonly Color32[] pixels = new Color32[Tex * Tex];
@@ -158,11 +247,11 @@ namespace AutopilotMod
 
         /// <summary>
         /// Most map icons are DXT1 (white shape on opaque black; the map's shader hides the black).
-        /// Bake a copy once per texture: white, with the shape's brightness as alpha.
+        /// Bake a copy once per texture: white, with the shape's brightness as alpha. False if nothing was baked.
         /// </summary>
-        private static void BakeIcon(Texture2D src)
+        private static bool BakeIcon(Texture2D src)
         {
-            if (src == null || iconAlpha.ContainsKey(src)) return;
+            if (src == null || iconAlpha.ContainsKey(src)) return false;
             int w = src.width, h = src.height;
             RenderTexture rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
             Graphics.Blit(src, rt); // GPU copy: the source isn't CPU-readable
@@ -187,6 +276,7 @@ namespace AutopilotMod
             t.SetPixels32(px);
             t.Apply(true, true); // mipmaps keep small icons smooth
             iconAlpha[src] = t;
+            return true;
         }
 
         private static readonly ConcurrentDictionary<int, byte[]> iconPng = new ConcurrentDictionary<int, byte[]>();
@@ -231,11 +321,15 @@ namespace AutopilotMod
 
         public void Reset()
         {
-            profiles.Clear();
-            building.Clear();
+            profiles.Clear(); // building / buildingEyes belong to a build that may still be running
+            eyes.Clear();
+            detectorsOf.Clear();
+            ringsOf.Clear();
+            rings.Clear();
+            shownRings.Clear();
+            avoid = null;
             contacts.Clear();
-            buildActive = false;
-            me = null;
+            me = null; // a build still running finishes on its own; the dirty rebuild below replaces it
             nextScan = 0f;
             Dirty("reset");
         }
@@ -263,6 +357,9 @@ namespace AutopilotMod
                     viewX = viewZ = 0f; // global origin is the map centre
                     viewR = MapHalfSize() * 1.02f;
                     break;
+                case ApCommand.RdrEyes: cfg.RadarEyes.Value = !cfg.RadarEyes.Value; nextScan = 0f; break;
+                case ApCommand.RdrSam: cfg.RadarSams.Value = !cfg.RadarSams.Value; nextScan = 0f; break;
+                case ApCommand.RdrAvoid: StartAvoid(); break;
             }
             Dirty("command");
         }
@@ -305,6 +402,7 @@ namespace AutopilotMod
                 nextScan = now + 1f;
                 FindMap();
                 CollectRadars();
+                CollectEyesAndRings();
             }
             if (now >= nextContacts)
             {
@@ -344,17 +442,13 @@ namespace AutopilotMod
                 ExportForPlanner();
                 UpdateDetail();
                 Perf.Add(Perf.Terrain, t);
-                t = Perf.Now;
-                // Own radar first so the OWN page fills quickly.
-                int budget = SampleBudget;
-                if (me.radar != null && profiles.TryGetValue(me.radar, out Profile own))
-                    budget -= Advance(own, budget);
-                foreach (Profile p in profiles.Values)
-                {
-                    if (budget <= 0) break;
-                    budget -= Advance(p, budget);
-                }
-                Perf.Add(Perf.Sweep, t);
+                UpdateSweeps();
+            }
+            if (avoid != null) StepAvoid();
+            if (!buildActive && avoid == null && retired.Count > 0)
+            {
+                foreach (float[] a in retired) spare.Push(a);
+                retired.Clear();
             }
 
             if (follow)
@@ -373,7 +467,10 @@ namespace AutopilotMod
             }
 
             t = Perf.Now;
-            if (buildActive) ContinueBuild();
+            if (buildActive)
+            {
+                if (buildJob.IsCompleted) FinishBuild();
+            }
             else if (now >= nextBuild && (dirty || ViewMoved()))
             {
                 nextBuild = now + 0.25f;
@@ -398,7 +495,12 @@ namespace AutopilotMod
                 profiles.Clear();
             }
             if (mapSettings != null && grid == null && MapHalfSize() > 0f)
+            {
                 grid = new TerrainHeightGrid(MapHalfSize() * 2f);
+                // the terrain only changes with the game: a new game version (or map size) maps it again
+                grid.UseCache(Path.Combine(FlightPlanner.Dir, "terrain", FlightPlanner.Safe(mapSettings.name) + ".bin"),
+                    $"{Application.version} {mapSettings.MapSize.x.ToString("R", CultureInfo.InvariantCulture)} {mapSettings.MapSize.y.ToString("R", CultureInfo.InvariantCulture)}");
+            }
         }
 
         /// <summary>Hand the map to the flight planner once its shading is ready (it keeps one export per map per session).</summary>
@@ -507,7 +609,7 @@ namespace AutopilotMod
                     profiles[r] = p;
                     TakeProfile(p, kv.Value);
                 }
-                else if (p.RaysDone >= Az)
+                else if (!p.Pending)
                 {
                     // Redo the profile once the radar has moved 2% of its range (others' 5%: many moving
                     // friendly radars would otherwise keep sweeping every frame), or its range changed.
@@ -522,6 +624,161 @@ namespace AutopilotMod
                 if (kv.Key == null || (kv.Value.Enemy == enemy && !live.ContainsKey(kv.Key))) dead.Add(kv.Key);
             foreach (TargetDetector r in dead) profiles.Remove(r);
             if (dead.Count > 0) Dirty("radar lost");
+            enemyScanned = enemy;
+        }
+
+        private bool enemyScanned; // the last radar scan was for ENMY (AVOID waits for one)
+
+        // reused by CollectEyesAndRings each second instead of new collections
+        private readonly HashSet<TargetDetector> liveEyes = new HashSet<TargetDetector>();
+        private readonly List<TargetDetector> scratchEyes = new List<TargetDetector>();
+        private readonly List<Unit> scratchUnits = new List<Unit>();
+
+        /// <summary>
+        /// Visual detectors and anti-air rings of the side the view shows (OWN: own jet's eyes only). Enemy
+        /// units sit at the position our side knows; never tracked = left out, as for radars.
+        /// </summary>
+        private void CollectEyesAndRings()
+        {
+            rings.Clear();
+            shownRings.Clear();
+            bool enemy = Current == Mode.Enemy, own = Current == Mode.Own;
+            liveEyes.Clear();
+            HashSet<TargetDetector> live = liveEyes;
+            if (me.NetworkHQ != null)
+                foreach (Unit u in UnitRegistry.allUnits)
+                {
+                    if (u == null || u.disabled || u is Missile || u.NetworkHQ == null || (u.NetworkHQ != me.NetworkHQ) != enemy || (own && u != me)) continue;
+                    GlobalPosition truePos = u.GlobalPosition(), at = truePos;
+                    if (enemy && !me.NetworkHQ.TryGetKnownPosition(u, out at)) continue;
+                    if (cfg.RadarEyes.Value || avoid != null) // AVOID plans with them even when not drawn
+                        foreach (TargetDetector d in Detectors(u))
+                        {
+                            // activated is ignored for the enemy (worst case: on), as for their radars
+                            if (d == null || !d.IsOperational() || d.GetVisualRange() <= 0f || d.GetScanPoint() == null || (!enemy && !d.activated)) continue;
+                            if (enemy && me.speed > EyeMaxSpeedRef(d)) continue; // too fast for these eyes to pick up
+                            float range = Mathf.Min(d.GetVisualRange(), me.GetVisibility() * d.GetVisualMagnification());
+                            if (range < 50f) continue;
+                            live.Add(d);
+                            UpdateEye(d, at + (d.GetScanPoint().GlobalPosition() - truePos), range);
+                        }
+                    // ALL: our air defence, to see the gaps; ENMY: the threats (AVOID plans with every enemy weapon)
+                    if ((cfg.RadarSams.Value || avoid != null) && !own && !(u is Aircraft))
+                    {
+                        Ring widest = default;
+                        foreach (Ring r in RingsOf(u))
+                        {
+                            Ring placed = r;
+                            placed.X = at.x;
+                            placed.Z = at.z;
+                            placed.Y = at.y;
+                            if (enemy) rings.Add(placed); // a gun can cover a missile's minimum range
+                            if (r.Max > widest.Max) widest = placed;
+                        }
+                        if (widest.Max > 0f && cfg.RadarSams.Value) ShowRing(widest);
+                    }
+                }
+            var gone = scratchEyes;
+            gone.Clear();
+            foreach (TargetDetector d in eyes.Keys)
+                if (!live.Contains(d)) gone.Add(d);
+            foreach (TargetDetector d in gone) eyes.Remove(d);
+            if (gone.Count > 0) Dirty("eye lost");
+
+            // forget destroyed units (Unity null)
+            var deadUnits = scratchUnits;
+            deadUnits.Clear();
+            foreach (Unit u in detectorsOf.Keys)
+                if (u == null) deadUnits.Add(u);
+            foreach (Unit u in ringsOf.Keys)
+                if (u == null) deadUnits.Add(u);
+            foreach (Unit u in deadUnits)
+            {
+                detectorsOf.Remove(u);
+                ringsOf.Remove(u);
+            }
+        }
+
+        private TargetDetector[] Detectors(Unit u)
+        {
+            if (!detectorsOf.TryGetValue(u, out TargetDetector[] d)) detectorsOf[u] = d = u.GetComponentsInChildren<TargetDetector>(true);
+            return d;
+        }
+
+        /// <summary>The unit's anti-air weapons, one ring per weapon type (cached: a unit's weapons don't change).</summary>
+        /// <summary>
+        /// Drawn rings: each unit's widest only, and one for a battery: a ring whose centre and radius are within
+        /// 10% / 5% of one already drawn would just thicken that line.
+        /// </summary>
+        private void ShowRing(Ring r)
+        {
+            foreach (Ring o in shownRings)
+            {
+                float dx = o.X - r.X, dz = o.Z - r.Z, near = 0.1f * r.Max;
+                if (Mathf.Abs(o.Max - r.Max) <= 0.05f * r.Max && dx * dx + dz * dz <= near * near) return;
+            }
+            shownRings.Add(r);
+        }
+
+        private Ring[] RingsOf(Unit u)
+        {
+            if (ringsOf.TryGetValue(u, out Ring[] r)) return r;
+            var seen = new HashSet<WeaponInfo>();
+            var list = new List<Ring>();
+            foreach (Weapon w in u.GetComponentsInChildren<Weapon>(true))
+            {
+                WeaponInfo i = w != null ? w.info : null;
+                if (i == null || !seen.Add(i) || i.cargo || i.troops || i.effectiveness.antiAir <= 0f || i.targetRequirements.maxRange <= 0f) continue;
+                list.Add(new Ring { Max = i.targetRequirements.maxRange, Min = i.targetRequirements.minRange, Missile = i.missile });
+            }
+            return ringsOf[u] = list.ToArray();
+        }
+
+        private void UpdateEye(TargetDetector d, GlobalPosition pos, float range)
+        {
+            bool fresh = !eyes.TryGetValue(d, out Eye e);
+            if (fresh) eyes[d] = e = new Eye();
+            // 5% of its range, as friendly radars: moving aircraft would otherwise redraw the map every second
+            else if ((pos - e.Origin).magnitude <= Mathf.Max(30f, e.Range * 0.05f) && Mathf.Abs(range - e.Range) <= e.Range * 0.05f) return;
+            // redraw only if the drawn overlay shows it, before or after (a build in progress may already have used the old one)
+            bool shown = cfg.RadarEyes.Value && (buildActive || OnOverlay(pos, range) || (!fresh && OnOverlay(e.Origin, e.Range)));
+            e.Origin = pos;
+            e.Alt = pos.ToLocalPosition().y - Datum.LocalSeaY;
+            e.Range = range;
+            e.Version++;
+            if (shown) Dirty("eye");
+        }
+
+        private bool OnOverlay(GlobalPosition p, float r) => Mathf.Abs(p.x - texX) < texR + r && Mathf.Abs(p.z - texZ) < texR + r;
+
+        /// <summary>
+        /// Line of sight from an eye along each bearing, as the game's LoS raycast: a target at TargetAsl at
+        /// the far edge of a bin is seen when it clears the steepest terrain before it and lies inside the
+        /// spotting range (3D, as FastMath.InRange). No horizon or cone for eyes. Any thread.
+        /// </summary>
+        private static void EyeViewshed(TerrainHeightGrid grid, float ox, float oz, float alt, float range, float agl, float tgtAsl, byte[] vis)
+        {
+            float step = range / EyeSteps, r2 = range * range;
+            int fine = Mathf.Clamp(Mathf.CeilToInt(step / grid.Cell), 1, 8);
+            float sub = step / fine;
+            for (int a = 0; a < EyeAz; a++)
+            {
+                float brg = (a + 0.5f) * (2f * Mathf.PI / EyeAz), sx = Mathf.Sin(brg), sz = Mathf.Cos(brg);
+                float maxSlope = float.NegativeInfinity;
+                int b = a * EyeSteps;
+                for (int i = 0; i < EyeSteps; i++)
+                {
+                    float d0 = i * step;
+                    for (int j = 1; j < fine; j++)
+                    {
+                        float dj = d0 + j * sub;
+                        maxSlope = Mathf.Max(maxSlope, (grid.Height(ox + sx * dj, oz + sz * dj) - alt) / dj);
+                    }
+                    float d = d0 + step, t = grid.Height(ox + sx * d, oz + sz * d), dy = TargetAsl(t, agl, tgtAsl) - alt;
+                    vis[b + i] = d * d + dy * dy > r2 ? SNone : dy / d >= maxSlope ? SEye : SMasked;
+                    maxSlope = Mathf.Max(maxSlope, (t - alt) / d);
+                }
+            }
         }
 
         /// <summary>
@@ -534,6 +791,7 @@ namespace AutopilotMod
             DynamicMap map = SceneSingleton<DynamicMap>.i;
             if (map == null) return;
             TargetListSelector filter = SceneSingleton<TargetListSelector>.i;
+            bool baked = false; // one icon per call: each bake waits for the GPU (ReadPixels); an unbaked contact is drawn once its icon is
             foreach (MapIcon icon in map.mapIcons)
             {
                 if (!(icon is UnitMapIcon ui) || !TargetPanel.ShownEnemy(ui, filter)) continue;
@@ -541,7 +799,7 @@ namespace AutopilotMod
                 // never tracked = position unknown: no true-position fallback
                 TrackingInfo track = map.HQ != null ? map.HQ.GetTrackingData(u.persistentID) : null;
                 if (track == null) continue;
-                if (ui.iconImage.sprite != null) BakeIcon(ui.iconImage.sprite.texture);
+                if (!baked && ui.iconImage.sprite != null) baked = BakeIcon(ui.iconImage.sprite.texture);
                 contacts.Add(new Contact
                 {
                     Unit = u,
@@ -596,63 +854,97 @@ namespace AutopilotMod
             p.NextOrigin = origin;
             p.NextRange = SweepRange(p.Radar);
             p.NextAlt = p.NextOrigin.ToLocalPosition().y - Datum.LocalSeaY;
-            p.RaysDone = 0;
+            p.Pending = true;
         }
 
-        /// <summary>
-        /// Continue a sweep from the height grid (no raycasts). Each range bin stores the terrain at
-        /// its far edge plus the steepest slope of grid-spaced samples inside it, so ridges narrower
-        /// than a bin still mask what lies behind them. Returns the lookups used.
-        /// </summary>
-        private int Advance(Profile p, int budget)
+        /// <summary>Swap in finished sweeps and start waiting ones on workers, own radar first so the OWN page fills quickly.</summary>
+        private void UpdateSweeps()
         {
-            if (p.RaysDone >= Az) return 0;
+            int running = 0;
+            foreach (Profile p in profiles.Values)
+                if (p.Job != null && !FinishSweep(p)) running++;
+            if (me.radar != null && profiles.TryGetValue(me.radar, out Profile own)) StartSweep(own, ref running);
+            foreach (Profile p in profiles.Values) StartSweep(p, ref running);
+        }
+
+        private void StartSweep(Profile p, ref int running)
+        {
+            if (!p.Pending || p.Job != null || running >= Workers) return;
+            running++;
             if (p.NextHeight == null)
             {
                 p.NextHeight = Rent();
                 p.NextBefore = Rent();
             }
-            float step = p.NextRange / Steps;
-            int fine = Mathf.Clamp(Mathf.CeilToInt(step / grid.Cell), 1, 32);
-            float sub = step / fine, ox = p.NextOrigin.x, oz = p.NextOrigin.z, alt = p.NextAlt;
-            int used = 0;
-            while (used < budget && p.RaysDone < Az)
+            TerrainHeightGrid g = grid;
+            float ox = p.NextOrigin.x, oz = p.NextOrigin.z, alt = p.NextAlt, range = p.NextRange;
+            float[] height = p.NextHeight, before = p.NextBefore;
+            p.Job = Task.Run(() => Background(() =>
             {
-                int a = p.RaysDone++, b = a * Steps;
+                long t = Perf.Now;
+                Sweep(g, ox, oz, alt, range, height, before);
+                Perf.Add(Perf.Sweep, t);
+            }));
+        }
+
+        /// <summary>Swap a finished sweep in; false while it still runs.</summary>
+        private bool FinishSweep(Profile p)
+        {
+            if (!p.Job.IsCompleted) return false;
+            Task job = p.Job;
+            p.Job = null;
+            p.Pending = false;
+            if (job.IsFaulted)
+            {
+                Debug.LogException(job.Exception);
+                p.NextHeight = p.NextBefore = null; // the profile keeps its last sweep
+                return true;
+            }
+            if (p.Height != null)
+            {
+                retired.Add(p.Height);
+                retired.Add(p.Before);
+            }
+            p.Height = p.NextHeight;
+            p.Before = p.NextBefore;
+            p.NextHeight = p.NextBefore = null;
+            p.Origin = p.NextOrigin;
+            p.Range = p.NextRange;
+            p.Alt = p.NextAlt;
+            p.Valid = true;
+            p.Sweep++;
+            Dirty("sweep");
+            Perf.Sweeps++;
+            return true;
+        }
+
+        /// <summary>
+        /// A radar's profile from the height grid (no raycasts). Each range bin stores the terrain at
+        /// its far edge plus the steepest slope of grid-spaced samples inside it, so ridges narrower
+        /// than a bin still mask what lies behind them. Any thread.
+        /// </summary>
+        private static void Sweep(TerrainHeightGrid grid, float ox, float oz, float alt, float range, float[] height, float[] before)
+        {
+            float step = range / Steps;
+            int fine = Mathf.Clamp(Mathf.CeilToInt(step / grid.Cell), 1, 32);
+            float sub = step / fine;
+            for (int a = 0; a < Az; a++)
+            {
+                int b = a * Steps;
                 float brg = (a + 0.5f) * (2f * Mathf.PI / Az), sx = Mathf.Sin(brg), sz = Mathf.Cos(brg);
                 for (int i = 0; i < Steps; i++)
                 {
-                    float before = float.NegativeInfinity, d0 = i * step;
+                    float steepest = float.NegativeInfinity, d0 = i * step;
                     for (int j = 1; j < fine; j++)
                     {
                         float d = d0 + j * sub;
-                        before = Mathf.Max(before, (grid.Height(ox + sx * d, oz + sz * d) - alt) / d);
+                        steepest = Mathf.Max(steepest, (grid.Height(ox + sx * d, oz + sz * d) - alt) / d);
                     }
                     float de = d0 + step;
-                    p.NextHeight[b + i] = grid.Height(ox + sx * de, oz + sz * de);
-                    p.NextBefore[b + i] = before;
+                    height[b + i] = grid.Height(ox + sx * de, oz + sz * de);
+                    before[b + i] = steepest;
                 }
-                used += Steps * fine;
             }
-            if (p.RaysDone >= Az)
-            {
-                if (p.Height != null)
-                {
-                    spare.Push(p.Height);
-                    spare.Push(p.Before);
-                }
-                p.Height = p.NextHeight;
-                p.Before = p.NextBefore;
-                p.NextHeight = p.NextBefore = null;
-                p.Origin = p.NextOrigin;
-                p.Range = p.NextRange;
-                p.Alt = p.NextAlt;
-                p.Valid = true;
-                p.VisAgl = float.NaN;
-                Dirty("sweep");
-                Perf.Sweeps++;
-            }
-            return used;
         }
 
         /// <summary>
@@ -666,12 +958,14 @@ namespace AutopilotMod
         /// Line-of-sight along each bearing: a target at TargetAsl at the far edge of bin i is
         /// visible when its elevation angle from the radar clears the steepest terrain before it
         /// (earlier bins, plus samples inside bin i), it is above the radar horizon, and its signal
-        /// beats the radar's minimum after clutter. vis: 0 = signal too weak, 1 = hidden, 2 = detected.
+        /// beats the radar's minimum after clutter. vis: SNone = out of reach, SMasked = signal strong enough
+        /// but hidden, SRadar = detected, SPainted (only with <paramref name="rwr"/>) = in line of sight but
+        /// too weak to detect: Aircraft.GetRadarReturn still fires the target's RWR warning there.
         /// Mirrors DetectorManager.RequestRadarCheck + RadarParams.GetSignalStrength with no ECM, where
         /// the doppler boost only applies once the signal already passes, so it can't change the result.
         /// </summary>
         internal static void Viewshed(float[] height, float[] before, float radarAlt, float agl, float tgtAsl, float step,
-            RadarParams rp, float rcs, float tgtRadius, byte[] vis)
+            RadarParams rp, float rcs, float tgtRadius, bool rwr, byte[] vis)
         {
             // The map is flat, but the game drops targets past the curved-earth horizon:
             // sqrt(2R*radarASL) + sqrt(2R*targetASL) < horizontal distance.
@@ -691,15 +985,18 @@ namespace AutopilotMod
                     float dist = Mathf.Sqrt(d * d + dy * dy);
                     float signal = Mathf.Min(rp.maxRange / dist * rcsGain, rp.maxSignal);
                     byte v;
-                    if (signal < rp.minSignal || dist > maxDist) v = 0;
-                    else if (dy / d < maxSlope || radarHorizon + Mathf.Sqrt(TwoR * Mathf.Max(0f, tgt)) < d) v = 1;
+                    if (dist > maxDist) v = SNone;
+                    else if (dy / d < maxSlope || radarHorizon + Mathf.Sqrt(TwoR * Mathf.Max(0f, tgt)) < d)
+                        v = signal >= rp.minSignal ? SMasked : SNone;
                     else
                     {
                         // below the radar's line to its horizon, the ground behind the target adds clutter
                         float clutter = size2 / (h * h); // the ground right under the target
                         if (d < radarHorizon && tgt < radarAlt * (1f - d / radarHorizon))
                             clutter += Mathf.Min(dist, 1000f) * (radarAlt - tgt) / (dist * h);
-                        v = signal - clutter * rp.clutterFactor >= rp.minSignal ? (byte)2 : (byte)1;
+                        v = signal - clutter * rp.clutterFactor >= rp.minSignal ? SRadar
+                            : rwr ? SPainted
+                            : signal >= rp.minSignal ? SMasked : SNone; // friendly: hidden by clutter, as before
                     }
                     vis[b + i] = v;
                     maxSlope = Mathf.Max(maxSlope, (t - radarAlt) / d);
@@ -714,36 +1011,73 @@ namespace AutopilotMod
             bZ = viewZ;
             bR = viewR * Margin;
             bEnemy = Current == Mode.Enemy;
-            System.Array.Clear(state, 0, state.Length);
+            TargetHeight(out bAgl, out bTgtAsl, out bHKey);
+            bRcs = TargetRcs(); // target: the RCS set for this view and own jet's size (ground clutter)
+            bRadius = me.maxRadius;
+            bGrid = grid;
             building.Clear();
             foreach (Profile p in profiles.Values)
-                if (p.Valid && !p.Jammed && p.Enemy == bEnemy && (Current != Mode.Own || p.Radar == me.radar)) building.Add(p);
-            buildIdx = 0;
-            buildRow = -1;
-            buildActive = true;
-            ContinueBuild();
+            {
+                if (!p.Valid || p.Jammed || p.Enemy != bEnemy || (Current == Mode.Own && p.Radar != me.radar)) continue;
+                Transform scan = p.Radar != null ? p.Radar.GetScanPoint() : null;
+                if (scan == null || !(p.Radar is Radar radar)) continue;
+                building.Add(new RadarSrc
+                {
+                    P = p, Height = p.Height, Before = p.Before, Ox = p.Origin.x, Oz = p.Origin.z, Alt = p.Alt, Range = p.Range,
+                    Sweep = p.Sweep, Cone = ConeOf(p, radar, scan), Rp = radar.RadarParameters,
+                });
+            }
+            buildingEyes.Clear();
+            if (cfg.RadarEyes.Value && grid != null && grid.Ready)
+                foreach (Eye e in eyes.Values)
+                    buildingEyes.Add(new EyeSrc { E = e, Ox = e.Origin.x, Oz = e.Origin.z, Alt = e.Alt, Range = e.Range, Version = e.Version });
+
+            // enemy view: seen by them is the danger (radar red, eyes orange, RWR-only yellow), masked is safe (green)
+            // opacity setting = red's alpha; green stays a little fainter, as drawn before (95 vs 130)
+            float op = bOpacity = Mathf.Clamp01(cfg.RadarOpacity.Value);
+            Color32 C(byte r, byte g, byte b, float a) => new Color32(r, g, b, (byte)(Mathf.Clamp01(a) * 255f));
+            bPal = bEnemy
+                ? new[] { None, C(60, 230, 90, op * 0.73f), C(255, 225, 60, op * 0.6f), C(255, 140, 30, op), C(240, 50, 40, op) }
+                : new[] { None, C(240, 50, 40, op), None, C(70, 200, 255, op * 0.85f), C(60, 230, 90, op * 0.73f) };
+            buildJob = Task.Run(() => Background(Build));
         }
 
-        private void ContinueBuild()
+        /// <summary>
+        /// Worker: stale line-of-sight tables first, then the texture in bands of rows, each band merging every source
+        /// (no two threads write the same pixel), then the web page's copy.
+        /// </summary>
+        private void Build()
         {
-            int budget = PixelBudget;
-            while (budget > 0 && buildIdx < building.Count)
+            long t = Perf.Now;
+            var opts = new ParallelOptions { MaxDegreeOfParallelism = Workers };
+            int radars = building.Count;
+            Parallel.For(0, radars + buildingEyes.Count, opts, i => Background(() =>
             {
-                budget -= Rasterize(building[buildIdx], budget);
-                if (buildRow < 0) buildIdx++; // that radar is done
-            }
-            if (buildIdx < building.Count) return;
+                if (i < radars) RadarVis(building[i]);
+                else EyeVis(buildingEyes[i - radars]);
+            }));
+            Parallel.For(0, Tex / Band, opts, band => Background(() =>
+            {
+                int y0 = band * Band, y1 = y0 + Band, k1 = y1 * Tex;
+                System.Array.Clear(state, y0 * Tex, Band * Tex);
+                foreach (RadarSrc s in building) Rasterize(s, y0, y1);
+                foreach (EyeSrc s in buildingEyes) RasterizeEye(s, y0, y1);
+                for (int k = y0 * Tex; k < k1; k++) pixels[k] = bPal[state[k]];
+            }));
+            bEncoded = EncodeOverlay();
+            Perf.Add(Perf.Build, t);
+        }
 
-            // enemy view: seen by them is the danger (red), terrain-masked is safe (green)
-            // opacity setting = red's alpha; green stays a little fainter, as drawn before (95 vs 130)
-            float op = Mathf.Clamp01(cfg.RadarOpacity.Value);
-            builtOpacity = op;
-            Color32 cov = Covered, mask = Masked;
-            cov.a = (byte)(op * 0.73f * 255f);
-            mask.a = (byte)(op * 255f);
-            Color32 seen = bEnemy ? mask : cov, hidden = bEnemy ? cov : mask;
-            for (int k = 0; k < pixels.Length; k++)
-                pixels[k] = state[k] == 2 ? seen : state[k] == 1 ? hidden : None;
+        /// <summary>Main thread: upload a finished build.</summary>
+        private void FinishBuild()
+        {
+            Task job = buildJob;
+            buildJob = null;
+            if (job.IsFaulted)
+            {
+                Debug.LogException(job.Exception);
+                return; // the last overlay stays; `dirty` brings the next try
+            }
             if (overlay == null)
                 overlay = new Texture2D(Tex, Tex, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, wrapMode = TextureWrapMode.Clamp };
             overlay.SetPixels32(pixels); // row 0 = south, so the texture draws north-up
@@ -751,37 +1085,84 @@ namespace AutopilotMod
             texX = bX;
             texZ = bZ;
             texR = bR;
-            buildActive = false;
+            OverlayData = bEncoded;
             builtSeq++;
             Perf.Builds++;
         }
 
-        private int buildRow = -1; // row to resume the current radar at; -1 = start the next radar
+        /// <summary>Texture pixel box a source at global x/z reaching `range` covers in the build's view; false if none.</summary>
+        private bool Box(float gx, float gz, float range, out float ox, out float oy, out int x0, out int x1, out int y0, out int y1)
+        {
+            float half = Tex * 0.5f, mPerPx = bR / half, rp = range / mPerPx;
+            ox = (gx - bX) / mPerPx + half;
+            oy = (gz - bZ) / mPerPx + half;
+            x0 = Mathf.Max(0, (int)(ox - rp));
+            x1 = Mathf.Min(Tex - 1, (int)(ox + rp));
+            y0 = Mathf.Max(0, (int)(oy - rp));
+            y1 = Mathf.Min(Tex - 1, (int)(oy + rp));
+            return x1 >= x0 && y1 >= y0;
+        }
+
+        /// <summary>Worker: redo a radar's line-of-sight table if it is in view and was taken for another sweep or target.</summary>
+        private void RadarVis(RadarSrc s)
+        {
+            Profile p = s.P;
+            // Approximately: hKey is computed, and Mono's extra precision would never match the stored float
+            if ((p.VisSweep == s.Sweep && Mathf.Approximately(p.VisAgl, bHKey) && p.VisRcs == bRcs && p.VisRadius == bRadius)
+                || !Box(s.Ox, s.Oz, s.Range, out _, out _, out _, out _, out _, out _)) return;
+            Interlocked.Increment(ref Perf.Viewsheds);
+            Viewshed(s.Height, s.Before, s.Alt, bAgl, bTgtAsl, s.Range / Steps, s.Rp, bRcs, bRadius, p.Enemy, p.Vis);
+            p.VisSweep = s.Sweep;
+            p.VisAgl = bHKey;
+            p.VisRcs = bRcs;
+            p.VisRadius = bRadius;
+        }
+
+        /// <summary>Worker: as RadarVis, for an eye.</summary>
+        private void EyeVis(EyeSrc s)
+        {
+            Eye e = s.E;
+            if ((e.VisVersion == s.Version && Mathf.Approximately(e.VisKey, bHKey)) || !Box(s.Ox, s.Oz, s.Range, out _, out _, out _, out _, out _, out _)) return;
+            EyeViewshed(bGrid, s.Ox, s.Oz, s.Alt, s.Range, bAgl, bTgtAsl, e.Vis);
+            e.VisVersion = s.Version;
+            e.VisKey = bHKey;
+        }
+
+        /// <summary>Target the view is drawn for: height above ground, or (TGT ALT, agl &lt; 0) own altitude as snapped in Tick; hKey identifies it.</summary>
+        private void TargetHeight(out float agl, out float tgtAsl, out float hKey)
+        {
+            agl = cfg.RadarTargetAgl.Value;
+            tgtAsl = agl < 0f ? altSnap : float.NaN;
+            hKey = agl < 0f ? -1f - altSnap : agl;
+        }
 
         /// <summary>
-        /// Merge one radar's coverage into `state`, a budget of pixels at a time (one long-range
-        /// radar can cover the whole texture). Returns the pixels it looked at; buildRow is -1
-        /// once the radar is finished.
+        /// A radar's scan cone (half-angle, 0 = all round), checked in 3D so it also covers the radar's up/down
+        /// limits for a target at that spot's height. Vector3.Angle(v, fwd) &gt; cone  &lt;=&gt;  dot(v, fwd) &lt; cos(cone)|v|
+        /// (fwd is unit): no acos per pixel.
         /// </summary>
-        private int Rasterize(Profile p, int budget)
+        private struct Cone
         {
-            Transform scan = p.Radar != null ? p.Radar.GetScanPoint() : null;
-            int resume = buildRow;
-            buildRow = -1;
-            if (scan == null || !(p.Radar is Radar radar)) return 0;
-            float half = Tex * 0.5f, mPerPx = bR / half, agl = cfg.RadarTargetAgl.Value;
-            float radarAlt = p.Alt;
-            // target: own jet's size (ground clutter) and the RCS set for this view; TGT ALT (agl < 0)
-            // = own altitude above sea level, as snapped in Tick
-            float rcs = TargetRcs(), tgtRadius = me.maxRadius;
-            float tgtAsl = agl < 0f ? altSnap : float.NaN, hKey = agl < 0f ? -1f - altSnap : agl;
+            public bool Cull, Flat, ElevOnly; // Flat = azimuth-only check; ElevOnly = pitch band, any azimuth
+            public float Half, Cos, Pitch;
+            public Vector3 Fwd;
 
-            // Scan cone (half-angle, 0 = all round) is checked in 3D, so it also covers the
-            // radar's up/down limits for a target at that spot's height.
+            /// <summary>Target at horizontal offset dx/dz (d2 = dx^2 + dz^2) and dy above the radar inside the cone?</summary>
+            public bool Holds(float dx, float dz, float dy, float d2)
+            {
+                if (!Cull) return true;
+                if (ElevOnly) return Mathf.Abs(Mathf.Atan2(dy, Mathf.Sqrt(d2)) * Mathf.Rad2Deg - Pitch) <= Half;
+                float vy = Flat ? 0f : dy;
+                return dx * Fwd.x + vy * Fwd.y + dz * Fwd.z >= Cos * Mathf.Sqrt(d2 + vy * vy);
+            }
+        }
+
+        private static Cone ConeOf(Profile p, Radar radar, Transform scan)
+        {
             float cone = RadarConeRef(radar);
             Vector3 fwd = scan.forward;
-            bool flat = false, elevOnly = false; // flat = azimuth-only check; elevOnly = pitch band, any azimuth
-            if (bEnemy)
+            bool flat = false, elevOnly = false;
+            if (p.Enemy)
             {
                 // Enemy: heading + pitch -> full cone; heading only -> azimuth check; pitch only (heading
                 // lost) -> the band of elevations the cone can reach turned any way; neither -> all-round.
@@ -792,59 +1173,301 @@ namespace AutopilotMod
                 elevOnly = !hKnown && pKnown;
                 if (!hKnown && !pKnown) cone = 0f;
             }
+            return new Cone { Cull = cone > 0f && cone < 180f, Flat = flat, ElevOnly = elevOnly, Half = cone, Cos = Mathf.Cos(cone * Mathf.Deg2Rad), Pitch = p.ConePitch, Fwd = fwd };
+        }
 
-            // Only touch pixels inside this radar's range box.
-            float ox = (p.Origin.x - bX) / mPerPx + half, oy = (p.Origin.z - bZ) / mPerPx + half, rp = p.Range / mPerPx;
-            int x0 = Mathf.Max(0, (int)(ox - rp)), x1 = Mathf.Min(Tex - 1, (int)(ox + rp));
-            int y0 = Mathf.Max(0, (int)(oy - rp)), y1 = Mathf.Min(Tex - 1, (int)(oy + rp));
-            if (x1 < x0 || y1 < y0) return 0;
-            int used = 0;
-            // Approximately: hKey is computed, and Mono's extra precision would never match the stored float
-            if (!Mathf.Approximately(p.VisAgl, hKey) || p.VisRcs != rcs || p.VisRadius != tgtRadius) // only for radars in view
-            {
-                used = ViewshedCost;
-                Perf.Viewsheds++;
-                Viewshed(p.Height, p.Before, radarAlt, agl, tgtAsl, p.Range / Steps, radar.RadarParameters, rcs, tgtRadius, p.Vis);
-                p.VisAgl = hKey;
-                p.VisRcs = rcs;
-                p.VisRadius = tgtRadius;
-            }
-            int y = Mathf.Max(y0, resume);
-            // Vector3.Angle(v, fwd) > cone  <=>  dot(v, fwd) < cos(cone)|v|  (fwd is unit): no acos per pixel
-            bool coneCull = cone > 0f && cone < 180f;
-            float cosCone = Mathf.Cos(cone * Mathf.Deg2Rad);
-            float binsPerM = Steps / p.Range, azPerRad = Az / (2f * Mathf.PI), r2 = p.Range * p.Range;
-            for (; y <= y1 && used < budget; y++, used += x1 - x0 + 1)
+        /// <summary>Worker: merge one radar's coverage into rows ry0..ry1-1 of `state`.</summary>
+        private void Rasterize(RadarSrc s, int ry0, int ry1)
+        {
+            if (!Box(s.Ox, s.Oz, s.Range, out float ox, out float oy, out int x0, out int x1, out int y0, out int y1)) return;
+            float mPerPx = bR / (Tex * 0.5f), binsPerM = Steps / s.Range, r2 = s.Range * s.Range, radarAlt = s.Alt, agl = bAgl, tgtAsl = bTgtAsl;
+            byte[] vis = s.P.Vis;
+            float[] height = s.Height;
+            Cone cone = s.Cone;
+            for (int y = Mathf.Max(y0, ry0), ye = Mathf.Min(y1, ry1 - 1); y <= ye; y++)
             {
                 float dz = (y + 0.5f - oy) * mPerPx;
-                for (int x = x0; x <= x1; x++)
+                RowSpan(r2 - dz * dz, ox, mPerPx, x0, x1, out int xa, out int xb);
+                for (int x = xa; x <= xb; x++)
                 {
                     float dx = (x + 0.5f - ox) * mPerPx, d2 = dx * dx + dz * dz;
                     if (d2 >= r2) continue;
                     int k = y * Tex + x;
-                    if (state[k] == 2) continue; // already covered by another radar
-                    float brg = Mathf.Atan2(dx, dz);
-                    if (brg < 0f) brg += 2f * Mathf.PI;
-                    int bin = Mathf.Min(Az - 1, (int)(brg * azPerRad)) * Steps + Mathf.Min(Steps - 1, (int)(Mathf.Sqrt(d2) * binsPerM));
-                    if (coneCull)
-                    {
-                        float dy = TargetAsl(p.Height[bin], agl, tgtAsl) - radarAlt;
-                        if (elevOnly)
-                        {
-                            if (Mathf.Abs(Mathf.Atan2(dy, Mathf.Sqrt(d2)) * Mathf.Rad2Deg - p.ConePitch) > cone) continue;
-                        }
-                        else
-                        {
-                            float vy = flat ? 0f : dy;
-                            if (dx * fwd.x + vy * fwd.y + dz * fwd.z < cosCone * Mathf.Sqrt(d2 + vy * vy)) continue;
-                        }
-                    }
-                    byte v = p.Vis[bin];
+                    if (state[k] == SRadar) continue; // already detected by another radar
+                    int bin = Bin(dx, dz, d2, binsPerM);
+                    if (cone.Cull && !cone.Holds(dx, dz, TargetAsl(height[bin], agl, tgtAsl) - radarAlt, d2)) continue;
+                    byte v = vis[bin];
                     if (v > state[k]) state[k] = v;
                 }
             }
-            if (y <= y1) buildRow = y;
-            return used;
+        }
+
+        /// <summary>
+        /// Columns of a row that can lie inside the circle (w2 = r^2 - dz^2): the box's corners are skipped, the
+        /// per-pixel test still decides (one column of slack each side for rounding).
+        /// </summary>
+        private static void RowSpan(float w2, float ox, float mPerPx, int x0, int x1, out int xa, out int xb)
+        {
+            if (w2 <= 0f)
+            {
+                xa = 0;
+                xb = -1;
+                return;
+            }
+            float w = Mathf.Sqrt(w2) / mPerPx;
+            xa = Mathf.Max(x0, (int)(ox - w) - 1);
+            xb = Mathf.Min(x1, (int)(ox + w) + 1);
+        }
+
+        /// <summary>Profile bin (bearing x range step) of a point dx/dz from the radar; d2 = dx^2 + dz^2.</summary>
+        private static int Bin(float dx, float dz, float d2, float binsPerM)
+        {
+            float brg = Mathf.Atan2(dx, dz);
+            if (brg < 0f) brg += 2f * Mathf.PI;
+            return Mathf.Min(Az - 1, (int)(brg * (Az / (2f * Mathf.PI)))) * Steps + Mathf.Min(Steps - 1, (int)(Mathf.Sqrt(d2) * binsPerM));
+        }
+
+        private static int EyeBin(float dx, float dz, float d2, float binsPerM)
+        {
+            float brg = Mathf.Atan2(dx, dz);
+            if (brg < 0f) brg += 2f * Mathf.PI;
+            return Mathf.Min(EyeAz - 1, (int)(brg * (EyeAz / (2f * Mathf.PI)))) * EyeSteps + Mathf.Min(EyeSteps - 1, (int)(Mathf.Sqrt(d2) * binsPerM));
+        }
+
+        /// <summary>Worker: merge one eye's coverage into rows ry0..ry1-1 of `state`, as Rasterize.</summary>
+        private void RasterizeEye(EyeSrc s, int ry0, int ry1)
+        {
+            if (!Box(s.Ox, s.Oz, s.Range, out float ox, out float oy, out int x0, out int x1, out int y0, out int y1)) return;
+            float mPerPx = bR / (Tex * 0.5f), binsPerM = EyeSteps / s.Range, r2 = s.Range * s.Range;
+            byte[] vis = s.E.Vis;
+            for (int y = Mathf.Max(y0, ry0), ye = Mathf.Min(y1, ry1 - 1); y <= ye; y++)
+            {
+                float dz = (y + 0.5f - oy) * mPerPx;
+                RowSpan(r2 - dz * dz, ox, mPerPx, x0, x1, out int xa, out int xb);
+                for (int x = xa; x <= xb; x++)
+                {
+                    float dx = (x + 0.5f - ox) * mPerPx, d2 = dx * dx + dz * dz;
+                    if (d2 >= r2) continue;
+                    int k = y * Tex + x;
+                    if (state[k] >= SEye) continue;
+                    byte v = vis[EyeBin(dx, dz, d2, binsPerM)];
+                    if (v > state[k]) state[k] = v;
+                }
+            }
+        }
+
+        // =====================================================================
+        // AVOID: re-plan the route's legs around what ENMY shows, at each leg's clearance
+        // =====================================================================
+        // Routing cells of RouteCell metres (2.5 height-grid cells), at most RouteMaxN a side: past that a big map gets coarser cells.
+        // shortcut: a valley narrower than a cell is not found; lower RouteCell if routes miss gaps (work grows with 1 / cell^2)
+        private const float RouteCell = 150f;
+        private const int RouteMaxN = 1200;
+        private const int StampBudget = 200000; // routing cells looked at per frame
+        private IEnumerator<bool> avoid;  // the planning in progress, one step per frame
+        private byte[] routeVis;          // a radar's line-of-sight table for a leg's clearance
+        private string note;              // shown in the status line until noteUntil
+        private float noteUntil;
+        private bool noteAmber;
+
+        private void Note(string text, bool amber)
+        {
+            note = text;
+            noteAmber = amber;
+            noteUntil = Time.unscaledTime + 5f;
+        }
+
+        private void StartAvoid()
+        {
+            if (me == null || ap.Route.Count == 0)
+            {
+                Note("AVOID - NO ROUTE", true);
+                return;
+            }
+            if (Current != Mode.Enemy)
+            {
+                Current = Mode.Enemy; // the plan needs the enemy picture; it stays on show afterwards
+                enemyScanned = false;
+            }
+            nextScan = 0f;
+            avoid = Avoid();
+        }
+
+        private void StepAvoid()
+        {
+            try
+            {
+                if (!avoid.MoveNext()) avoid = null;
+            }
+            catch (Exception ex)
+            {
+                avoid = null;
+                Note("AVOID FAILED", true);
+                Debug.LogException(ex);
+            }
+        }
+
+        private IEnumerator<bool> Avoid()
+        {
+            // wait for the full enemy picture: the terrain, an ENMY scan, and every radar's sweep
+            float give = Time.unscaledTime + 60f;
+            while (grid == null || !grid.Ready || !enemyScanned || Sweeping())
+            {
+                if (Time.unscaledTime > give || Current != Mode.Enemy)
+                {
+                    Note("AVOID - NO ENEMY DATA", true);
+                    yield break;
+                }
+                yield return true;
+            }
+
+            var plan = new List<Waypoint>();
+            foreach (Waypoint w in ap.Route) plan.Add(new Waypoint { X = w.X, Z = w.Z, Clearance = w.Clearance, Speed = w.Speed });
+            GlobalPosition jet = me.GlobalPosition();
+            float size = MapHalfSize() * 2f, x0 = -size * 0.5f;
+            int n = Mathf.Clamp(Mathf.CeilToInt(size / RouteCell), 64, RouteMaxN);
+            float cell = size / n;
+            var costs = new Dictionary<int, float[]>(); // by clearance (whole metres)
+            var result = new List<Waypoint>();
+            float ax = jet.x, az = jet.z;
+            foreach (Waypoint w in plan)
+            {
+                int key = Mathf.RoundToInt(w.Clearance);
+                if (!costs.TryGetValue(key, out float[] cost))
+                {
+                    var flags = new byte[n * n];
+                    for (IEnumerator<bool> s = ThreatFlags(w.Clearance, flags, n, x0, cell); s.MoveNext();) yield return true;
+                    costs[key] = cost = CostOf(flags);
+                }
+                // A* over up to RouteMaxN^2 cells takes a while: off the main thread (the cost grid is not touched again)
+                float sx = ax, sz = az;
+                var job = System.Threading.Tasks.Task.Run(() => ThreatRouter.Path(cost, n, x0, x0, cell, sx, sz, w.X, w.Z));
+                while (!job.IsCompleted) yield return true;
+                List<float[]> path = job.Result; // a failure rethrows here: StepAvoid reports it
+                for (int i = 0; i < path.Count - 1; i++)
+                    result.Add(new Waypoint { X = path[i][0], Z = path[i][1], Clearance = w.Clearance, Speed = w.Speed });
+                result.Add(w);
+                ax = w.X;
+                az = w.Z;
+                yield return true;
+            }
+
+            // NAV may have flown past a waypoint, or the pilot edited the route, while this ran: don't undo that
+            bool same = ap.Route.Count == plan.Count;
+            for (int i = 0; same && i < plan.Count; i++) same = ap.Route[i].X == plan[i].X && ap.Route[i].Z == plan[i].Z;
+            if (!same)
+            {
+                Note("ROUTE CHANGED - AVOID AGAIN", true);
+                yield break;
+            }
+            ap.LoadRoute(result);
+            Note($"AVOID +{result.Count - plan.Count} WPT", false);
+            Dirty("avoid"); // the eyes' tables were taken at the legs' clearances
+        }
+
+        private bool Sweeping()
+        {
+            foreach (Profile p in profiles.Values)
+                if (p.Enemy && (!p.Valid || p.Pending)) return true;
+            return false;
+        }
+
+        // routing grid flags per cell
+        private const byte FPainted = 1, FEye = 2, FRadar = 4, FSam = 8;
+
+        /// <summary>
+        /// What sees a target <paramref name="agl"/> above the ground at each routing cell: every known enemy radar
+        /// (one line-of-sight table per frame; jammed ones too, jamming comes and goes), their eyes and their AA rings.
+        /// </summary>
+        private IEnumerator<bool> ThreatFlags(float agl, byte[] flags, int n, float x0, float cell)
+        {
+            float rcs = TargetRcs(), radius = me.maxRadius;
+            if (routeVis == null) routeVis = new byte[Az * Steps];
+            foreach (Profile p in new List<Profile>(profiles.Values))
+            {
+                Transform scan = p.Radar != null ? p.Radar.GetScanPoint() : null;
+                if (!p.Enemy || !p.Valid || scan == null || !(p.Radar is Radar radar)) continue;
+                Cone cone = ConeOf(p, radar, scan);
+                float binsPerM = Steps / p.Range;
+                // the sweep routeVis was taken from, even if a new one lands while this runs over several frames
+                // (its arrays are only recycled once AVOID is done)
+                float[] height = p.Height, before = p.Before;
+                float alt = p.Alt, step = p.Range / Steps;
+                RadarParams rp = radar.RadarParameters;
+                Task los = Task.Run(() => Background(() => Viewshed(height, before, alt, agl, float.NaN, step, rp, rcs, radius, true, routeVis)));
+                while (!los.IsCompleted) yield return true;
+                los.Wait(); // rethrows a failure: StepAvoid reports it
+                for (IEnumerator<bool> s = Stamp(p.Origin.x, p.Origin.z, p.Range, n, x0, cell, (dx, dz, d2) =>
+                {
+                    int bin = Bin(dx, dz, d2, binsPerM);
+                    if (cone.Cull && !cone.Holds(dx, dz, height[bin] + agl - alt, d2)) return 0;
+                    byte v = routeVis[bin];
+                    return v == SRadar ? FRadar : v == SPainted ? FPainted : (byte)0;
+                }, flags); s.MoveNext();) yield return true;
+                yield return true;
+            }
+            foreach (Eye e in new List<Eye>(eyes.Values))
+            {
+                // its own table: the display's build worker owns e.Vis
+                var vis = new byte[EyeAz * EyeSteps];
+                EyeViewshed(grid, e.Origin.x, e.Origin.z, e.Alt, e.Range, agl, float.NaN, vis);
+                float binsPerM = EyeSteps / e.Range;
+                for (IEnumerator<bool> s = Stamp(e.Origin.x, e.Origin.z, e.Range, n, x0, cell,
+                    (dx, dz, d2) => vis[EyeBin(dx, dz, d2, binsPerM)] == SEye ? FEye : (byte)0, flags); s.MoveNext();) yield return true;
+            }
+            foreach (Ring r in new List<Ring>(rings))
+            {
+                Ring rr = r;
+                for (IEnumerator<bool> s = Stamp(r.X, r.Z, r.Max, n, x0, cell, (dx, dz, d2) =>
+                {
+                    float dy = grid.Height(rr.X + dx, rr.Z + dz) + agl - rr.Y, s2 = d2 + dy * dy;
+                    return s2 <= rr.Max * rr.Max && s2 >= rr.Min * rr.Min ? FSam : (byte)0;
+                }, flags); s.MoveNext();) yield return true;
+            }
+        }
+
+        /// <summary>
+        /// OR <paramref name="at"/>'s flags into every routing cell within <paramref name="range"/> of x/z, pausing
+        /// (yield) every StampBudget cells: one long-range radar can cover the whole map.
+        /// </summary>
+        private static IEnumerator<bool> Stamp(float x, float z, float range, int n, float x0, float cell, Func<float, float, float, byte> at, byte[] flags)
+        {
+            int i0 = Mathf.Max(0, (int)((x - range - x0) / cell)), i1 = Mathf.Min(n - 1, (int)((x + range - x0) / cell));
+            int j0 = Mathf.Max(0, (int)((z - range - x0) / cell)), j1 = Mathf.Min(n - 1, (int)((z + range - x0) / cell));
+            float r2 = range * range;
+            int done = 0;
+            for (int j = j0; j <= j1; j++)
+            {
+                float dz = x0 + (j + 0.5f) * cell - z;
+                for (int i = i0; i <= i1; i++)
+                {
+                    float dx = x0 + (i + 0.5f) * cell - x, d2 = dx * dx + dz * dz;
+                    if (d2 < r2 && d2 > 1f) flags[j * n + i] |= at(dx, dz, d2);
+                }
+                done += i1 - i0 + 1;
+                if (done >= StampBudget)
+                {
+                    done = 0;
+                    yield return true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Cost per metre of flying through each cell: 1 in the clear, more where something sees you; an AA ring is
+        /// the worst place to be seen, but it can't shoot what nobody tracks, so a masked ring costs little.
+        /// </summary>
+        private static float[] CostOf(byte[] flags)
+        {
+            var cost = new float[flags.Length];
+            for (int k = 0; k < flags.Length; k++)
+            {
+                byte f = flags[k];
+                bool seen = (f & (FRadar | FEye)) != 0;
+                cost[k] = 1f + ((f & FPainted) != 0 ? 2f : 0f) + ((f & FEye) != 0 ? 15f : 0f) + ((f & FRadar) != 0 ? 30f : 0f)
+                    + ((f & FSam) != 0 ? (seen ? 80f : 6f) : 0f);
+            }
+            return cost;
         }
 
         // =====================================================================
@@ -987,7 +1610,7 @@ namespace AutopilotMod
             GlobalPosition g = me != null ? me.GlobalPosition() : default;
             string mode = Current == Mode.All ? "ALL" : Current == Mode.Own ? "OWN" : "ENMY";
             var sb = new StringBuilder(FormattableString.Invariant(
-                $"{{\"mode\":\"{mode}\",\"tgt\":\"{TgtLabel()}\",\"folw\":{(follow ? "true" : "false")},\"rng\":{viewR / 1000f:F0},\"rcs\":{TargetRcs():0.###},\"nav\":{(ap.Nav ? "true" : "false")},\"eta\":\"{(ap.ApEngaged ? ap.EtaText(me) : null)}\",\"opa\":{cfg.RadarOpacity.Value:0.##},\"unit\":\"{Units.AltUnit}\",\"sunit\":\"{Units.SpeedUnit}\",\"wps\":["));
+                $"{{\"mode\":\"{mode}\",\"tgt\":\"{TgtLabel()}\",\"folw\":{(follow ? "true" : "false")},\"rng\":{viewR / 1000f:F0},\"rcs\":{TargetRcs():0.###},\"nav\":{(ap.Nav ? "true" : "false")},\"eta\":\"{(ap.ApEngaged ? ap.EtaText(me) : null)}\",\"opa\":{cfg.RadarOpacity.Value:0.##},\"unit\":\"{Units.AltUnit}\",\"sunit\":\"{Units.SpeedUnit}\",\"eyes\":{(cfg.RadarEyes.Value ? "true" : "false")},\"sam\":{(cfg.RadarSams.Value ? "true" : "false")},\"avoid\":{(avoid != null ? "true" : "false")},\"wps\":["));
             for (int i = 0; i < ap.Route.Count; i++)
             {
                 Waypoint w = ap.Route[i];
@@ -1059,6 +1682,21 @@ namespace AutopilotMod
                 }
             }
 
+            // AA rings at their slant range: missiles solid, guns faint
+            if (cfg.RadarSams.Value)
+            {
+                float pxPerM = screen.width * 0.5f / viewR, rw = Mathf.Max(1.2f, 0.0025f * S);
+                foreach (Ring r in shownRings)
+                {
+                    Vector2 s = ToScreen(r.X, r.Z);
+                    float rad = r.Max * pxPerM;
+                    if (rad < 3f || s.x + rad < 0f || s.y + rad < 0f || s.x - rad > screen.width || s.y - rad > screen.height) continue;
+                    Color col = Current == Mode.Enemy ? EnemySiteCol : SiteCol;
+                    if (!r.Missile) col.a = 0.5f;
+                    Border(new Rect(s.x - rad, s.y - rad, 2f * rad, 2f * rad), col, rw, rad); // a fully rounded border: one draw call per ring
+                }
+            }
+
             // enemy contacts drawn with the map icon's own sprite and colour; position from the same
             // track the icon uses, heading read off the icon (the map freezes it while a track is stale)
             DynamicMap map = SceneSingleton<DynamicMap>.i;
@@ -1114,19 +1752,28 @@ namespace AutopilotMod
 
             if (!bare) DrawLegends(); // the web page has its own controls
 
-            // bottom status line: what is shown + colour key
-            Fill(Sc(0f, 0.92f, 1f, 0.08f), LegendBack, 0f);
+            // bottom status line: what is shown + colour key (above the bottom row's legends in the game)
+            float ly = bare ? 0.92f : 0.82f;
+            Fill(Sc(0f, ly, 1f, 0.08f), LegendBack, 0f);
             string status = Status(out bool amber);
-            Text(Sc(0.02f, 0.92f, 0.5f, 0.08f), status, 0.03f, amber ? Amber : Green, TextAnchor.MiddleLeft);
-            Color green = new Color(0.35f, 0.95f, 0.45f), red = new Color(1f, 0.3f, 0.25f);
+            Text(Sc(0.02f, ly, 0.48f, 0.08f), status, 0.03f, amber ? Amber : Green, TextAnchor.MiddleLeft);
             bool en = Current == Mode.Enemy;
-            Text(Sc(0.5f, 0.92f, 0.48f, 0.08f), "SEEN", 0.026f, en ? red : green, TextAnchor.MiddleLeft);
-            Text(Sc(0.66f, 0.92f, 0.32f, 0.08f), "HIDDEN", 0.026f, en ? green : red, TextAnchor.MiddleRight);
+            string[] keys = en ? new[] { "RDR", "EYE", "RWR", "HID" } : new[] { "RDR", "EYE", "HID" };
+            Color[] cols = en ? new[] { KeyRed, KeyOrange, KeyYellow, KeyGreen } : new[] { KeyGreen, KeyCyan, KeyRed };
+            for (int i = 0; i < keys.Length; i++)
+                Text(Sc(0.5f + i * 0.12f, ly, 0.12f, 0.08f), keys[i], 0.026f, cols[i], TextAnchor.MiddleLeft);
         }
 
-        /// <summary>Bottom status line: what is shown; amber = a problem (no radar, jammed).</summary>
+        /// <summary>Bottom status line: what is shown, or a passing note; amber = a problem (no radar, jammed).</summary>
         private string Status(out bool amber)
         {
+            amber = false;
+            if (avoid != null) return "AVOID: PLANNING";
+            if (Time.unscaledTime < noteUntil)
+            {
+                amber = noteAmber;
+                return note;
+            }
             bool noRadar = Current == Mode.Own && ownRadarMissing;
             bool ownJammed = !noRadar && me.radar != null && profiles.TryGetValue(me.radar, out Profile op) && op.Jammed;
             amber = noRadar || (Current == Mode.Own ? ownJammed : jammedCount > 0);
@@ -1145,8 +1792,7 @@ namespace AutopilotMod
         // renders and encodes nothing for it. The map image and terrain shading come from the flight
         // planner's map file; the coverage overlay and the fine terrain tile are sent when they change.
         // =====================================================================
-        private int builtSeq, sentSeq = -1, detailSeq = -1;
-        private float builtOpacity;
+        private int builtSeq, detailSeq = -1;
         private TerrainHeightGrid detailSent;
 
         /// <summary>
@@ -1158,14 +1804,15 @@ namespace AutopilotMod
         /// <summary>The fine terrain tile for /detail: centre x, z and size (m, float32 each), then its shading as PNG.</summary>
         public volatile byte[] DetailData;
 
+        /// <summary>Worker, at the end of a build.</summary>
         private byte[] EncodeOverlay()
         {
             var ms = new MemoryStream(64 * 1024);
             var w = new BinaryWriter(ms);
-            w.Write(texX);
-            w.Write(texZ);
-            w.Write(texR);
-            w.Write(builtOpacity);
+            w.Write(bX);
+            w.Write(bZ);
+            w.Write(bR);
+            w.Write(bOpacity);
             w.Write(bEnemy ? 1 : 0);
             for (int k = 0; k < state.Length;)
             {
@@ -1209,18 +1856,13 @@ namespace AutopilotMod
         /// </summary>
         public void WebState(StringBuilder sb)
         {
-            if (!buildActive && sentSeq != builtSeq) // state[] holds the finished overlay until the next build starts
-            {
-                sentSeq = builtSeq;
-                OverlayData = EncodeOverlay();
-            }
             EncodeDetail();
             var inv = CultureInfo.InvariantCulture;
             sb.Append("{\"map\":\"").Append(mapSettings != null ? FlightPlanner.Safe(mapSettings.name) : "").Append('"');
             sb.Append(",\"rmax\":").Append((int)(MapHalfSize() * 1.5f));
             sb.Append(",\"view\":[").Append((int)viewX).Append(',').Append((int)viewZ).Append(',').Append((int)viewR).Append(']');
             sb.Append(",\"folw\":").Append(follow ? "true" : "false");
-            sb.Append(",\"ov\":").Append(OverlayData != null ? sentSeq : -1);
+            sb.Append(",\"ov\":").Append(OverlayData != null ? builtSeq : -1);
             sb.Append(",\"det\":").Append(detailTex != null && DetailData != null ? Volatile.Read(ref detailSeq) : -1);
             sb.Append(",\"en\":").Append(Current == Mode.Enemy ? "true" : "false");
             sb.Append(",\"nav\":").Append(ap.Nav ? "true" : "false");
@@ -1275,6 +1917,16 @@ namespace AutopilotMod
                 sb.Append(",\"s\":").Append(targets != null && targets.Contains(k.Unit) ? "true" : "false").Append('}');
                 first = false;
             }
+
+            // AA rings: x, z, slant range (m), 1 = missile
+            sb.Append("],\"sams\":[");
+            first = true;
+            if (cfg.RadarSams.Value)
+                foreach (Ring r in shownRings)
+                {
+                    sb.Append(first ? "[" : ",[").Append((int)r.X).Append(',').Append((int)r.Z).Append(',').Append((int)r.Max).Append(',').Append(r.Missile ? 1 : 0).Append(']');
+                    first = false;
+                }
 
             // route: x, z, label
             sb.Append("],\"wps\":[");
@@ -1333,7 +1985,8 @@ namespace AutopilotMod
                     DrawArrow(r, b, b.Glyph == Glyph.Up);
                     continue;
                 }
-                TextAnchor anchor = b.Side == Side.Left ? TextAnchor.MiddleLeft : b.Side == Side.Right ? TextAnchor.MiddleRight : TextAnchor.UpperCenter;
+                TextAnchor anchor = b.Side == Side.Left ? TextAnchor.MiddleLeft : b.Side == Side.Right ? TextAnchor.MiddleRight
+                    : b.Side == Side.Bottom ? TextAnchor.LowerCenter : TextAnchor.UpperCenter;
                 string label;
                 bool boxed = false;
                 switch (b.Command)
@@ -1351,6 +2004,9 @@ namespace AutopilotMod
                         label = $"RCS\n{TargetRcs():0.###}";
                         boxed = RcsSetting.Value <= 0f;
                         break;
+                    case ApCommand.RdrEyes: label = "EYES"; boxed = cfg.RadarEyes.Value; break;
+                    case ApCommand.RdrSam: label = "SAM"; boxed = cfg.RadarSams.Value; break;
+                    case ApCommand.RdrAvoid: label = "AVOID"; boxed = avoid != null; break;
                     default: label = "MAP"; break;
                 }
                 Legend(r, label, anchor, boxed, false, lit);

@@ -9,15 +9,15 @@ namespace AutopilotMod
     /// <summary>
     /// Where the mod spends CPU time: its entry points timed with a Stopwatch, averaged per frame over
     /// the last second (DATA page), and a breakdown logged every 10 s while the DATA page is on.
-    /// Radar is part of Update and Mirror part of Gui. Encode runs on the mirror's own threads: not
+    /// Radar is part of Update and Mirror part of Gui. Encode, the radar sweeps and overlay builds run on worker threads: not
     /// frame time, but a core the game can't use. GPU and render-thread work isn't in any of these:
     /// if the frame time grows by much more than the mod's total, that's where it went.
     /// </summary>
     internal static class Perf
     {
-        public const int Update = 0, Radar = 1, Gui = 2, Mirror = 3, Autopilot = 4, Encode = 5, Sweep = 6, Raster = 7, Terrain = 8;
+        public const int Update = 0, Radar = 1, Gui = 2, Mirror = 3, Autopilot = 4, Encode = 5, Sweep = 6, Raster = 7, Terrain = 8, Build = 9;
         private static readonly string[] Names = { "update", "radar tick", "OnGUI", "mirror render", "autopilot", "jpeg encode (worker)",
-            "radar: sweeps", "radar: overlay", "radar: terrain rays" };
+            "radar: sweeps (worker)", "radar: overlay upload", "radar: terrain rays", "radar: overlay build (worker)" };
 
         /// <summary>Radar profile sweeps and coverage overlays finished since the last log line.</summary>
         public static int Sweeps, Builds, Viewsheds;

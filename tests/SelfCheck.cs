@@ -171,6 +171,57 @@ internal static class SelfCheck
                 Check(low > 24f, $"TF v={v} terrain {terrain}: clearance dipped to {low:F1} m (set 30)");
             }
 
+        // ---- threat-avoidance routing (100 x 100 cells of 10 m) ----
+        {
+            const int n = 100;
+            var open = new float[n * n];
+            for (int k = 0; k < open.Length; k++) open[k] = 1f;
+            var p = ThreatRouter.Path(open, n, 0f, 0f, 10f, 55f, 55f, 945f, 945f);
+            Check(p.Count == 1 && Near(p[0][0], 945f) && Near(p[0][1], 945f), $"no threats: one straight leg (got {p.Count} turn points)");
+
+            // a wall at x 500 m from z = 0 to 800 m, cost 100: the route must go round its open end
+            var wall = (float[])open.Clone();
+            for (int j = 0; j < 80; j++) wall[j * n + 50] = 100f;
+            p = ThreatRouter.Path(wall, n, 0f, 0f, 10f, 100f, 100f, 900f, 100f);
+            float top = 0f;
+            foreach (float[] t in p) top = Math.Max(top, t[1]);
+            Check(top >= 800f, $"wall: route goes round its end (highest turn point z {top:F0} m)");
+            Check(p.Count <= 4, $"wall: few turn points ({p.Count}): " + string.Join(" ", p.ConvertAll(t => $"{t[0]:F0},{t[1]:F0}")));
+            Check(Near(p[p.Count - 1][0], 900f) && Near(p[p.Count - 1][1], 100f), "wall: ends at the destination");
+
+            // a threat disc in the middle: no leg of the route may cut through it
+            var disc = (float[])open.Clone();
+            for (int j = 0; j < n; j++)
+                for (int i = 0; i < n; i++)
+                    if ((i - 50) * (i - 50) + (j - 50) * (j - 50) < 20 * 20) disc[j * n + i] = 50f;
+            p = ThreatRouter.Path(disc, n, 0f, 0f, 10f, 100f, 500f, 900f, 500f);
+            float ax = 100f, az = 500f, worst = 1f;
+            foreach (float[] t in p)
+            {
+                for (int s = 0; s <= 50; s++)
+                {
+                    float x = ax + (t[0] - ax) * s / 50f, z = az + (t[1] - az) * s / 50f;
+                    worst = Math.Max(worst, disc[Math.Min(n - 1, (int)(z / 10f)) * n + Math.Min(n - 1, (int)(x / 10f))]);
+                }
+                ax = t[0]; az = t[1];
+            }
+            Check(worst <= 1f, "disc: the route stays out of the threat");
+
+            // the game's largest routing grid (1200 x 1200 cells of 150 m) with a 30 km threat disc: still round it, in seconds
+            const int big = 1200;
+            var wide = new float[big * big];
+            for (int j = 0; j < big; j++)
+                for (int i = 0; i < big; i++)
+                    wide[j * big + i] = (i - 600) * (i - 600) + (j - 600) * (j - 600) < 200 * 200 ? 50f : 1f;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            p = ThreatRouter.Path(wide, big, 0f, 0f, 150f, 10000f, 90000f, 170000f, 90000f);
+            clock.Stop();
+            Console.WriteLine($"1200x1200 route: {clock.ElapsedMilliseconds} ms, {p.Count} turn points");
+            // hugging the arc: a chord may cut in by half a cell (75 m), so a point every ~4 km of a 30 km radius
+            Check(p.Count >= 2 && p.Count <= 30, $"big grid: goes round the disc ({p.Count} turn points)");
+            Check(clock.ElapsedMilliseconds < 10000, $"big grid: took {clock.ElapsedMilliseconds} ms");
+        }
+
         Console.WriteLine(failures == 0 ? "Self-check passed." : $"{failures} check(s) failed.");
         return failures == 0 ? 0 : 1;
     }

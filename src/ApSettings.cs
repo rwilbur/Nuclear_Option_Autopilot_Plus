@@ -81,6 +81,8 @@ namespace AutopilotMod
         public ConfigEntry<float> RadarTargetAgl;
         public ConfigEntry<float> RadarEnemyRcs, RadarFriendlyRcs;
         public ConfigEntry<float> RadarOpacity;
+        public ConfigEntry<bool> RadarEyes, RadarSams;
+        public ConfigEntry<float> GunHeatSize, GunHeatX, GunHeatY;
 
         // ---- web mirror ----
         public ConfigEntry<bool> MirrorEnabled;
@@ -174,6 +176,11 @@ namespace AutopilotMod
             RadarEnemyRcs = cfg.Bind(D, "RadarEnemyRcs", 0f, new ConfigDescription("Radar cross section the ENMY coverage map is drawn for. 0 = your own aircraft's current RCS (it grows with external stores). The RCS buttons and the web mirror set it.", new AcceptableValueRange<float>(0f, 1000f)));
             RadarOpacity = cfg.Bind(D, "RadarCoverageOpacity", 0.5f, new ConfigDescription("Opacity of the coverage colours on the radar map (0 = invisible, 1 = solid). The web mirror's slider sets it.", new AcceptableValueRange<float>(0f, 1f)));
             RadarFriendlyRcs = cfg.Bind(D, "RadarFriendlyRcs", 1f, new ConfigDescription("Radar cross section the ALL/OWN coverage maps are drawn for (e.g. a stealthy enemy's). 0 = your own aircraft's current RCS. The RCS buttons and the web mirror set it.", new AcceptableValueRange<float>(0f, 1000f)));
+            RadarEyes = cfg.Bind(D, "RadarShowVisual", true, "Radar map: also show where units spot the target by eye (EYES button).");
+            RadarSams = cfg.Bind(D, "RadarShowSamRings", true, "Radar map: draw anti-air weapon engagement rings (SAM button).");
+            GunHeatSize = cfg.Bind(D, "GunHeatSize", 0.22f, "Gun-heat display size as a fraction of screen height. It shows only in aircraft whose gun can overheat.");
+            GunHeatX = cfg.Bind(D, "GunHeatPositionX", 0.985f, "Gun-heat display horizontal position (0 = left edge, 1 = right edge). Updated when you drag it.");
+            GunHeatY = cfg.Bind(D, "GunHeatPositionY", 0.45f, "Gun-heat display vertical position (0 = top, 1 = bottom). Updated when you drag it.");
             ShowDebug = cfg.Bind(D, "ShowDebugLine", false, "Show commanded vs actual rates and raw stick outputs on the MFD (useful when tuning).");
 
             const string M = "WebMirror";

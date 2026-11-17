@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="SelfCheck.cs" />
     <Compile Include="..\src\ApMath.cs" />
+    <Compile Include="..\src\ThreatRouter.cs" />
   </ItemGroup>
 
 </Project>
