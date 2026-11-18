@@ -47,7 +47,12 @@ namespace AutopilotMod
             cfg = new ApSettings(Config);
             ap = new FlightController(cfg, Report);
             mfd = new MfdPage(cfg, ap);
-            radarPage = new RadarCoveragePage(cfg);
+            radarPage = new RadarCoveragePage(cfg, ap.Nav)
+            {
+                Report = Report,
+                RouteReplaced = ap.OnRouteReplaced,
+                NavActive = () => ap.Lateral == LateralMode.Nav,
+            };
             mirror = new WebMirror(cfg, Logger, Report, mfd, radarPage);
             sounds = new SoundBank();
             StartCoroutine(sounds.LoadAll(Logger));
@@ -279,8 +284,13 @@ namespace AutopilotMod
                 case ApCommand.RdrRcsUp:
                 case ApCommand.RdrRcsDown:
                 case ApCommand.RdrRcsOwn:
+                case ApCommand.RteWpt:
+                case ApCommand.RteUndo:
+                case ApCommand.RteClear:
+                case ApCommand.RtePlan:
                     radarPage.Command(cmd);
                     break;
+                case ApCommand.NavToggle: ap.ToggleNav(); break;
                 case ApCommand.Hide:
                     cfg.MfdVisible.Value = false;
                     SetCursorMode(false);

@@ -25,7 +25,17 @@ namespace AutopilotMod
     ///   L3 ^RCS  |  map + coverage (scroll = zoom,      |  R3 RNG
     ///   L4 RCS   |  drag = pan)                         |  R4 v (zoom out)
     ///   L5 vRCS  +--------------------------------------+
+    ///            B1 WPT   B2 UNDO  B3 CLR   B4 RTE   B5 NAV
     ///   (L4 = back to own RCS)
+    ///
+    /// Each sweep is turned into a MASKING HEIGHT per bin (CoverageMath.MaskHeights): the lowest
+    /// altitude the radar can see there. Any target height is then one comparison, and TGT MASK draws
+    /// the masking height itself: in ENMY, how low you must fly to stay unseen; in ALL/OWN, how low an
+    /// intruder could slip under your radars.
+    ///
+    /// Route: WPT turns map clicks into waypoints (the last one is the destination), RTE plans a
+    /// radar-avoiding route there (RoutePlanner, on a worker thread) from the enemy radars your side
+    /// knows, and NAV flies it. A planned route is re-planned when that radar picture changes.
     ///
     /// The map's terrain is raycast once into a TerrainHeightGrid. Each radar's polar profile
     /// (Az bearings x Steps range bins) is read from that grid over a few frames, and redone when
@@ -38,7 +48,8 @@ namespace AutopilotMod
 
         private const int Az = 360, Steps = 400, Tex = 512;
         private const float MinRange = 2000f;
-        private static readonly float[] AglsM = { 5f, 30f, 150f, 500f, 2000f, -1f }; // -1 = ALT: own altitude
+        private static readonly float[] AglsM = { 5f, 30f, 150f, 500f, 2000f, -1f, MaskView }; // -1 = ALT: own altitude
+        private const float MaskView = -2f;   // TGT MASK: draw the masking height
         private const float MinAgl = 5f;
 
         private static readonly AccessTools.FieldRef<Radar, float> RadarConeRef =
@@ -65,6 +76,11 @@ namespace AutopilotMod
             new Osb { Side = Side.Left, Index = 4, Command = ApCommand.RdrRcsDown, Glyph = Glyph.Down },
             new Osb { Side = Side.Right, Index = 1, Command = ApCommand.RdrZoomIn, Glyph = Glyph.Up },
             new Osb { Side = Side.Right, Index = 3, Command = ApCommand.RdrZoomOut, Glyph = Glyph.Down },
+            new Osb { Side = Side.Bottom, Index = 0, Command = ApCommand.RteWpt, Glyph = Glyph.Text },
+            new Osb { Side = Side.Bottom, Index = 1, Command = ApCommand.RteUndo, Glyph = Glyph.Text },
+            new Osb { Side = Side.Bottom, Index = 2, Command = ApCommand.RteClear, Glyph = Glyph.Text },
+            new Osb { Side = Side.Bottom, Index = 3, Command = ApCommand.RtePlan, Glyph = Glyph.Text },
+            new Osb { Side = Side.Bottom, Index = 4, Command = ApCommand.NavToggle, Glyph = Glyph.Text },
         };
 
         protected override Osb[] Buttons => RdrButtons;
@@ -78,7 +94,7 @@ namespace AutopilotMod
             public float ConeHeading = float.NaN; // enemy: heading off its map icon (deg); NaN = unknown
             public float ConePitch = float.NaN;   // enemy: antenna pitch while that heading is live, then the last one (deg); NaN = never known
             public float[] Height; // terrain height above sea level at each bin's far edge (m); null until the first sweep is done
-            public float[] Before; // steepest terrain slope seen from the radar inside the bin, short of its far edge
+            public float[] Mask;   // masking height (m ASL): lowest altitude the radar sees at each bin's far edge
             public readonly byte[] Vis = new byte[Az * Steps];
             public float VisAgl = float.NaN, VisRcs, VisRadius; // target Vis was computed for (VisAgl: height key); NaN = stale
 
@@ -86,7 +102,7 @@ namespace AutopilotMod
             public GlobalPosition NextOrigin;
             public float NextRange, NextAlt;
             public int RaysDone = Az;
-            public float[] NextHeight, NextBefore; // rented from `spare` only while a sweep runs
+            public float[] NextHeight, NextBefore; // rented from `spare` only while a sweep runs (NextBefore becomes Mask)
         }
 
         // Back buffers are shared: a radar holds a pair only during its sweep, which halves the
@@ -113,6 +129,17 @@ namespace AutopilotMod
         private bool bEnemy;
 
         private readonly byte[] state = new byte[Tex * Tex]; // 0 none, 1 masked, 2 covered
+        private readonly float[] maskPx = new float[Tex * Tex]; // TGT MASK: lowest masking height (m above ground)
+        private bool bMask;                                       // overlay being built is the MASK view
+
+        // MASK view colour bands, by masking height above ground (m): upper bounds and colours for the
+        // ENMY view (low = you are seen even low down = danger); ALL/OWN use them reversed.
+        private static readonly float[] MaskBands = { 5f, 30f, 150f, 500f, 2000f };
+        private static readonly Color32[] MaskCols =
+        {
+            new Color32(240, 40, 35, 140), new Color32(250, 120, 30, 130), new Color32(245, 200, 40, 120),
+            new Color32(170, 230, 60, 105), new Color32(60, 220, 90, 90),
+        };
         private readonly Color32[] pixels = new Color32[Tex * Tex];
         private Texture2D overlay;
 
@@ -167,9 +194,31 @@ namespace AutopilotMod
         private bool ownRadarMissing;
         private int siteCount, jammedCount;
 
-        public RadarCoveragePage(ApSettings cfg) : base(cfg.RadarSize, cfg.RadarX, cfg.RadarY)
+        // ---- route ----
+        private readonly NavRoute nav;
+        /// <summary>Messages for the pilot (A/P MFD + HUD).</summary>
+        public System.Action<string, bool> Report;
+        /// <summary>The planner replaced the route (the flight controller re-anchors leg 0).</summary>
+        public System.Action RouteReplaced;
+        /// <summary>Whether NAV is the A/P's lateral mode (lights the NAV legend).</summary>
+        public System.Func<bool> NavActive;
+        private bool wptMode;
+        private Vector2 downPos;
+        private bool planWanted;                 // RTE pressed or a replan is due: plan once enemy sweeps are in
+        private float planWantedAt, lastPlan = -100f;
+        private int enemyPicture, plannedPicture = -1; // bumps when the known enemy radar picture changes
+        private volatile RoutePlanner planJob;   // running on a worker thread
+        private volatile List<Waypoint> planResult;
+        private volatile bool planDone;
+        private float planStartX, planStartZ;
+        private string routeInfo;
+
+        private bool Routing => planWanted || planJob != null || (nav.Planned && nav.Has && cfg.RouteAutoReplan.Value);
+
+        public RadarCoveragePage(ApSettings cfg, NavRoute nav) : base(cfg.RadarSize, cfg.RadarX, cfg.RadarY)
         {
             this.cfg = cfg;
+            this.nav = nav;
             if (System.Array.IndexOf(AglsM, cfg.RadarTargetAgl.Value) < 0) cfg.RadarTargetAgl.Value = 150f;
         }
 
@@ -197,6 +246,10 @@ namespace AutopilotMod
             me = null;
             nextScan = 0f;
             dirty = true;
+            planWanted = false;
+            planJob = null;
+            planDone = false;
+            plannedPicture = -1;
         }
 
         public void Command(ApCommand cmd)
@@ -222,6 +275,38 @@ namespace AutopilotMod
                     viewX = viewZ = 0f; // global origin is the map centre
                     viewR = MapHalfSize() * 1.02f;
                     break;
+                case ApCommand.RteWpt: wptMode = !wptMode; return;
+                case ApCommand.RteUndo:
+                    if (nav.Planned) nav.Clear();
+                    else if (nav.Points.Count > 0)
+                    {
+                        nav.Points.RemoveAt(nav.Points.Count - 1);
+                        nav.Active = Mathf.Min(nav.Active, nav.Points.Count);
+                        nav.Version++;
+                    }
+                    routeInfo = null;
+                    return;
+                case ApCommand.RteClear:
+                    nav.Clear();
+                    planWanted = false;
+                    routeInfo = null;
+                    return;
+                case ApCommand.RtePlan:
+                    if (float.IsNaN(nav.DestX) && nav.Points.Count == 0)
+                    {
+                        Report?.Invoke("RTE - SET A WPT FIRST", true);
+                        return;
+                    }
+                    if (float.IsNaN(nav.DestX))
+                    {
+                        nav.DestX = nav.Points[nav.Points.Count - 1].X;
+                        nav.DestZ = nav.Points[nav.Points.Count - 1].Z;
+                    }
+                    planWanted = true;
+                    planWantedAt = Time.unscaledTime;
+                    routeInfo = "RTE PLANNING";
+                    nextScan = 0f;
+                    return;
             }
             dirty = true;
         }
@@ -245,7 +330,8 @@ namespace AutopilotMod
         public void Tick(Aircraft aircraft, bool active)
         {
             me = aircraft;
-            if (!active) return;
+            bool routing = Routing;
+            if (!active && !routing) return;
             float now = Time.unscaledTime;
             if (now >= nextScan)
             {
@@ -258,12 +344,13 @@ namespace AutopilotMod
                 }
                 if (mapSettings != null && grid == null && MapHalfSize() > 0f)
                     grid = new TerrainHeightGrid(MapHalfSize() * 2f);
-                CollectRadars();
+                CollectRadars(Current == Mode.Enemy, true);
+                if (routing && Current != Mode.Enemy) CollectRadars(true, false); // the planner needs the enemy picture
             }
             if (now >= nextContacts)
             {
                 nextContacts = now + 0.25f;
-                CollectContacts();
+                if (active) CollectContacts();
                 float rcs = TargetRcs();
                 if (rcs != lastRcs) dirty = true; // stores released, or set from the web mirror
                 lastRcs = rcs;
@@ -276,6 +363,7 @@ namespace AutopilotMod
                     bool shown = p.Enemy == enemyView;
                     bool j = (!p.Enemy || showJam) && p.Radar is Radar rr && rr.IsJammed();
                     if (j != p.Jammed && shown) dirty = true;
+                    if (j != p.Jammed && p.Enemy) enemyPicture++;
                     p.Jammed = j;
                     if (j && shown) jammedCount++;
 
@@ -298,6 +386,9 @@ namespace AutopilotMod
                 }
             }
 
+            UpdateRouting(now);
+            if (!active) return;
+
             if (follow)
             {
                 GlobalPosition g = me.GlobalPosition();
@@ -307,7 +398,7 @@ namespace AutopilotMod
 
             // TGT ALT: redraw once own altitude moves 3% (at least 25 m) from what was drawn
             float alt = me.GlobalPosition().y;
-            if (cfg.RadarTargetAgl.Value < 0f && Mathf.Abs(alt - altSnap) > Mathf.Max(25f, altSnap * 0.03f))
+            if (cfg.RadarTargetAgl.Value == -1f && Mathf.Abs(alt - altSnap) > Mathf.Max(25f, altSnap * 0.03f))
             {
                 altSnap = alt;
                 dirty = true;
@@ -331,12 +422,13 @@ namespace AutopilotMod
             return viewR * Margin != texR || Mathf.Abs(viewX - texX) > slack || Mathf.Abs(viewZ - texZ) > slack;
         }
 
-        private void CollectRadars()
+        /// <param name="enemy">which side's radars to collect</param>
+        /// <param name="display">this is the side the page shows (site count, OWN radar status)</param>
+        private void CollectRadars(bool enemy, bool display)
         {
             // radar -> scan point to sweep from; enemy radars sit where our side last saw them
             var live = new Dictionary<TargetDetector, GlobalPosition>();
-            bool enemy = Current == Mode.Enemy;
-            siteCount = 0;
+            int sites = 0;
             foreach (Unit u in UnitRegistry.allUnits)
             {
                 TargetDetector r = u != null ? u.radar : null;
@@ -356,9 +448,13 @@ namespace AutopilotMod
                 }
                 else if (u.NetworkHQ != me.NetworkHQ || (!isOwn && (!r.activated || !r.IsOperational()))) continue;
                 live[r] = scan;
-                if (!isOwn) siteCount++;
+                if (!isOwn) sites++;
             }
-            ownRadarMissing = me.radar == null || !live.ContainsKey(me.radar);
+            if (display)
+            {
+                siteCount = sites;
+                ownRadarMissing = me.radar == null || !live.ContainsKey(me.radar);
+            }
 
             foreach (KeyValuePair<TargetDetector, GlobalPosition> kv in live)
             {
@@ -383,7 +479,11 @@ namespace AutopilotMod
             foreach (KeyValuePair<TargetDetector, Profile> kv in profiles)
                 if (kv.Key == null || (kv.Value.Enemy == enemy && !live.ContainsKey(kv.Key))) dead.Add(kv.Key);
             foreach (TargetDetector r in dead) profiles.Remove(r);
-            if (dead.Count > 0) dirty = true;
+            if (dead.Count > 0)
+            {
+                dirty = true;
+                if (enemy) enemyPicture++;
+            }
         }
 
         /// <summary>
@@ -495,13 +595,15 @@ namespace AutopilotMod
             }
             if (p.RaysDone >= Az)
             {
+                CoverageMath.MaskHeights(p.NextHeight, p.NextBefore, p.NextAlt, step, Az, Steps);
                 if (p.Height != null)
                 {
                     spare.Push(p.Height);
-                    spare.Push(p.Before);
+                    spare.Push(p.Mask);
                 }
                 p.Height = p.NextHeight;
-                p.Before = p.NextBefore;
+                p.Mask = p.NextBefore;
+                if (p.Enemy) enemyPicture++;
                 p.NextHeight = p.NextBefore = null;
                 p.Origin = p.NextOrigin;
                 p.Range = p.NextRange;
@@ -521,36 +623,31 @@ namespace AutopilotMod
             float.IsNaN(tgtAsl) ? t + agl : Mathf.Max(tgtAsl, t + MinAgl);
 
         /// <summary>
-        /// Line-of-sight along each bearing: a target at TargetAsl at the far edge of bin i is
-        /// visible when its elevation angle from the radar clears the steepest terrain before it
-        /// (earlier bins, plus samples inside bin i), it is above the radar horizon, and its signal
-        /// beats the radar's minimum after clutter. vis: 0 = signal too weak, 1 = hidden, 2 = detected.
+        /// Per bin: a target at TargetAsl at the far edge of bin i is in line of sight when it is at
+        /// or above the bin's masking height (terrain and radar horizon, see CoverageMath.MaskHeights),
+        /// and detected when its signal beats the radar's minimum after clutter.
+        /// vis: 0 = signal too weak, 1 = hidden, 2 = detected.
         /// Mirrors DetectorManager.RequestRadarCheck + RadarParams.GetSignalStrength with no ECM, where
         /// the doppler boost only applies once the signal already passes, so it can't change the result.
         /// </summary>
-        internal static void Viewshed(float[] height, float[] before, float radarAlt, float agl, float tgtAsl, float step,
+        internal static void Viewshed(float[] height, float[] mask, float radarAlt, float agl, float tgtAsl, float step,
             RadarParams rp, float rcs, float tgtRadius, byte[] vis)
         {
-            // The map is flat, but the game drops targets past the curved-earth horizon:
-            // sqrt(2R*radarASL) + sqrt(2R*targetASL) < horizontal distance.
-            const float TwoR = 12742000f;
-            float radarHorizon = Mathf.Sqrt(TwoR * Mathf.Max(0f, radarAlt));
+            float radarHorizon = Mathf.Sqrt(CoverageMath.TwoR * Mathf.Max(0f, radarAlt));
             float rcsGain = Mathf.Pow(rcs, 0.25f), maxDist = rp.maxRange * 2f;
             float size2 = tgtRadius * tgtRadius * 2f;
             for (int a = 0; a < Az; a++)
             {
                 int b = a * Steps;
-                float maxSlope = float.NegativeInfinity;
                 for (int i = 0; i < Steps; i++)
                 {
                     float d = (i + 1) * step, t = height[b + i], tgt = TargetAsl(t, agl, tgtAsl), dy = tgt - radarAlt;
                     float h = tgt - t; // target's radar altitude
-                    maxSlope = Mathf.Max(maxSlope, before[b + i]);
                     float dist = Mathf.Sqrt(d * d + dy * dy);
                     float signal = Mathf.Min(rp.maxRange / dist * rcsGain, rp.maxSignal);
                     byte v;
                     if (signal < rp.minSignal || dist > maxDist) v = 0;
-                    else if (dy / d < maxSlope || radarHorizon + Mathf.Sqrt(TwoR * Mathf.Max(0f, tgt)) < d) v = 1;
+                    else if (tgt < mask[b + i]) v = 1;
                     else
                     {
                         // below the radar's line to its horizon, the ground behind the target adds clutter
@@ -560,7 +657,6 @@ namespace AutopilotMod
                         v = signal - clutter * rp.clutterFactor >= rp.minSignal ? (byte)2 : (byte)1;
                     }
                     vis[b + i] = v;
-                    maxSlope = Mathf.Max(maxSlope, (t - radarAlt) / d);
                 }
             }
         }
@@ -572,7 +668,9 @@ namespace AutopilotMod
             bZ = viewZ;
             bR = viewR * Margin;
             bEnemy = Current == Mode.Enemy;
+            bMask = cfg.RadarTargetAgl.Value == MaskView;
             System.Array.Clear(state, 0, state.Length);
+            if (bMask) for (int i = 0; i < maskPx.Length; i++) maskPx[i] = float.PositiveInfinity;
             building.Clear();
             foreach (Profile p in profiles.Values)
                 if (p.Valid && !p.Jammed && p.Enemy == bEnemy && (Current != Mode.Own || p.Radar == me.radar)) building.Add(p);
@@ -592,10 +690,24 @@ namespace AutopilotMod
             }
             if (buildIdx < building.Count) return;
 
-            // enemy view: seen by them is the danger (red), terrain-masked is safe (green)
-            Color32 seen = bEnemy ? Masked : Covered, hidden = bEnemy ? Covered : Masked;
-            for (int k = 0; k < pixels.Length; k++)
-                pixels[k] = state[k] == 2 ? seen : state[k] == 1 ? hidden : None;
+            if (bMask)
+            {
+                for (int k = 0; k < pixels.Length; k++)
+                {
+                    float m = maskPx[k];
+                    int band = 0;
+                    while (band < MaskBands.Length && m >= MaskBands[band]) band++;
+                    // past the top band (or out of every radar's reach): no colour
+                    pixels[k] = band >= MaskBands.Length ? None : MaskCols[bEnemy ? band : MaskBands.Length - 1 - band];
+                }
+            }
+            else
+            {
+                // enemy view: seen by them is the danger (red), terrain-masked is safe (green)
+                Color32 seen = bEnemy ? Masked : Covered, hidden = bEnemy ? Covered : Masked;
+                for (int k = 0; k < pixels.Length; k++)
+                    pixels[k] = state[k] == 2 ? seen : state[k] == 1 ? hidden : None;
+            }
             if (overlay == null)
                 overlay = new Texture2D(Tex, Tex, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, wrapMode = TextureWrapMode.Clamp };
             overlay.SetPixels32(pixels); // row 0 = south, so the texture draws north-up
@@ -649,10 +761,11 @@ namespace AutopilotMod
             int y0 = Mathf.Max(0, (int)(oy - rp)), y1 = Mathf.Min(Tex - 1, (int)(oy + rp));
             if (x1 < x0 || y1 < y0) return 0;
             int used = 0;
+            if (bMask) return RasterizeMask(p, cone, fwd, flat, elevOnly, ox, oy, x0, x1, y0, y1, mPerPx, rcs, resume, budget);
             if (p.VisAgl != hKey || p.VisRcs != rcs || p.VisRadius != tgtRadius) // only for radars in view
             {
                 used = ViewshedCost;
-                Viewshed(p.Height, p.Before, radarAlt, agl, tgtAsl, p.Range / Steps, radar.RadarParameters, rcs, tgtRadius, p.Vis);
+                Viewshed(p.Height, p.Mask, radarAlt, agl, tgtAsl, p.Range / Steps, radar.RadarParameters, rcs, tgtRadius, p.Vis);
                 p.VisAgl = hKey;
                 p.VisRcs = rcs;
                 p.VisRadius = tgtRadius;
@@ -685,6 +798,197 @@ namespace AutopilotMod
             return used;
         }
 
+        /// <summary>
+        /// MASK view: merge one radar's masking height above ground into maskPx (lowest wins), inside
+        /// its scan azimuth and out to the range the set RCS can be detected at without clutter. Clutter
+        /// and the cone's elevation limits are left out, so the map errs low (the safe side for ENMY).
+        /// </summary>
+        private int RasterizeMask(Profile p, float cone, Vector3 fwd, bool flat, bool elevOnly, float ox, float oy,
+            int x0, int x1, int y0, int y1, float mPerPx, float rcs, int resume, int budget)
+        {
+            RadarParams rp = ((Radar)p.Radar).RadarParameters;
+            float reach = Mathf.Min(p.Range, CoverageMath.DetectRange(rp.maxRange, rp.minSignal, rcs));
+            float binsPerM = Steps / p.Range, azPerRad = Az / (2f * Mathf.PI), r2 = reach * reach;
+            Vector3 fwdFlat = new Vector3(fwd.x, 0f, fwd.z);
+            bool azCheck = cone > 0f && !elevOnly && fwdFlat.sqrMagnitude > 1e-4f;
+            int used = 0, y = Mathf.Max(y0, resume);
+            for (; y <= y1 && used < budget; y++, used += x1 - x0 + 1)
+            {
+                float dz = (y + 0.5f - oy) * mPerPx;
+                for (int x = x0; x <= x1; x++)
+                {
+                    float dx = (x + 0.5f - ox) * mPerPx, d2 = dx * dx + dz * dz;
+                    if (d2 >= r2) continue;
+                    if (azCheck && Vector3.Angle(new Vector3(dx, 0f, dz), fwdFlat) > cone) continue;
+                    float brg = Mathf.Atan2(dx, dz);
+                    if (brg < 0f) brg += 2f * Mathf.PI;
+                    int bin = Mathf.Min(Az - 1, (int)(brg * azPerRad)) * Steps + Mathf.Min(Steps - 1, (int)(Mathf.Sqrt(d2) * binsPerM));
+                    float agl = Mathf.Max(0f, p.Mask[bin] - p.Height[bin]);
+                    int k = y * Tex + x;
+                    if (agl < maskPx[k]) maskPx[k] = agl;
+                }
+            }
+            if (y <= y1) buildRow = y;
+            return used;
+        }
+
+        // =====================================================================
+        // Route: waypoints, planning, re-planning
+        // =====================================================================
+        private void AddWaypoint(float gx, float gz)
+        {
+            if (nav.Planned) nav.Clear(); // a click after a planned route starts a new one
+            nav.Points.Add(new Waypoint(gx, gz));
+            nav.DestX = gx;
+            nav.DestZ = gz;
+            nav.Version++;
+            routeInfo = null;
+        }
+
+        /// <summary>
+        /// Hand a finished plan to NAV; start a plan (or a re-plan when the known enemy radar picture
+        /// changed) once the terrain is mapped and the enemy radars' sweeps are in (or 8 s passed).
+        /// </summary>
+        private void UpdateRouting(float now)
+        {
+            if (planDone)
+            {
+                planDone = false;
+                RoutePlanner job = planJob;
+                List<Waypoint> r = planResult;
+                planJob = null;
+                planResult = null;
+                if (r != null && r.Count > 0 && !float.IsNaN(nav.DestX))
+                {
+                    bool first = !nav.Planned;
+                    float dx = nav.DestX, dz = nav.DestZ;
+                    nav.Replace(r, planStartX, planStartZ, true);
+                    nav.DestX = dx;
+                    nav.DestZ = dz;
+                    RouteReplaced?.Invoke();
+                    routeInfo = $"RTE {r.Count} LEG{(r.Count == 1 ? "" : "S")} - SEEN {job.ExposedSeconds:0}S";
+                    Report?.Invoke(first ? $"RTE READY {r.Count} LEGS" : "RTE UPDATED", job.ExposedSeconds > 0.5f);
+                }
+                else if (r == null)
+                {
+                    routeInfo = "RTE FAILED";
+                    Report?.Invoke("RTE - NO ROUTE FOUND", true);
+                }
+            }
+            if (planJob != null || me == null) return;
+
+            if (!planWanted && nav.Planned && nav.Has && cfg.RouteAutoReplan.Value
+                && enemyPicture != plannedPicture && now - lastPlan > 10f)
+            {
+                planWanted = true;
+                planWantedAt = now;
+            }
+            if (!planWanted || float.IsNaN(nav.DestX)) return;
+            if (grid == null || !grid.Ready)
+            {
+                routeInfo = "RTE - MAPPING TERRAIN";
+                return;
+            }
+            bool sweeping = false;
+            foreach (Profile p in profiles.Values)
+                if (p.Enemy && (!p.Valid || p.RaysDone < Az)) sweeping = true;
+            if (sweeping && now - planWantedAt < 8f) return;
+            StartPlan(now);
+        }
+
+        private void StartPlan(float now)
+        {
+            planWanted = false;
+            lastPlan = now;
+            plannedPicture = enemyPicture;
+            GlobalPosition g = me.GlobalPosition();
+            float sx = g.x, sz = g.z, gx = nav.DestX, gz = nav.DestZ;
+
+            // square planning box around both ends, clamped to the map
+            float dist = new Vector2(gx - sx, gz - sz).magnitude, margin = Mathf.Max(15000f, 0.35f * dist);
+            float cx = (sx + gx) * 0.5f, cz = (sz + gz) * 0.5f;
+            float size = Mathf.Max(Mathf.Abs(gx - sx), Mathf.Abs(gz - sz)) + 2f * margin;
+            float half = MapHalfSize();
+            size = Mathf.Min(size, 2f * half);
+            float minX = Mathf.Clamp(cx - size * 0.5f, -half, half - size), minZ = Mathf.Clamp(cz - size * 0.5f, -half, half - size);
+            int n = Mathf.Clamp(Mathf.CeilToInt(size / 250f), 32, 160);
+            float cell = size / n;
+
+            var job = new RoutePlanner
+            {
+                N = n,
+                OriginX = minX,
+                OriginZ = minZ,
+                Cell = cell,
+                Hide = BuildHide(minX, minZ, cell, n, cfg.RadarEnemyRcs.Value > 0f ? cfg.RadarEnemyRcs.Value : me.RCS),
+                Bands = ParseBands(cfg.RouteHeights.Value),
+                Speed = Mathf.Max(me.speed, 100f),
+                ExposureWeight = Mathf.Max(0f, cfg.RouteExposureWeight.Value),
+                LowPenalty = Mathf.Max(0f, cfg.RouteLowPenalty.Value),
+                MinLeg = Mathf.Max(1500f, 3f * cell),
+            };
+            planStartX = sx;
+            planStartZ = sz;
+            planJob = job;
+            routeInfo = "RTE PLANNING";
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                List<Waypoint> r = null;
+                try { r = job.Plan(sx, sz, gx, gz); }
+                catch (System.Exception) { r = null; }
+                planResult = r;
+                planDone = true;
+            });
+        }
+
+        /// <summary>
+        /// Planner input: per cell, the highest height above ground hidden from every known enemy radar
+        /// (the lowest masking height among them, inside each one's scan azimuth when known and out to
+        /// where the RCS can be detected). Read from the radars' polar sweeps on the main thread.
+        /// </summary>
+        private float[] BuildHide(float minX, float minZ, float cell, int n, float rcs)
+        {
+            var hide = new float[n * n];
+            for (int i = 0; i < hide.Length; i++) hide[i] = float.PositiveInfinity;
+            foreach (Profile p in profiles.Values)
+            {
+                if (!p.Enemy || !p.Valid || p.Jammed || p.Mask == null || !(p.Radar is Radar radar)) continue;
+                RadarParams rp = radar.RadarParameters;
+                float reach = Mathf.Min(p.Range, CoverageMath.DetectRange(rp.maxRange, rp.minSignal, rcs));
+                float cone = RadarConeRef(radar);
+                bool azCheck = cone > 0f && !float.IsNaN(p.ConeHeading);
+                float hr = p.ConeHeading * Mathf.Deg2Rad;
+                Vector3 fwd = azCheck ? new Vector3(Mathf.Sin(hr), 0f, Mathf.Cos(hr)) : Vector3.forward;
+                float binsPerM = Steps / p.Range, azPerRad = Az / (2f * Mathf.PI), r2 = reach * reach;
+                int x0 = Mathf.Max(0, (int)((p.Origin.x - reach - minX) / cell)), x1 = Mathf.Min(n - 1, (int)((p.Origin.x + reach - minX) / cell));
+                int z0 = Mathf.Max(0, (int)((p.Origin.z - reach - minZ) / cell)), z1 = Mathf.Min(n - 1, (int)((p.Origin.z + reach - minZ) / cell));
+                for (int z = z0; z <= z1; z++)
+                for (int x = x0; x <= x1; x++)
+                {
+                    float dx = minX + (x + 0.5f) * cell - p.Origin.x, dz = minZ + (z + 0.5f) * cell - p.Origin.z, d2 = dx * dx + dz * dz;
+                    if (d2 >= r2) continue;
+                    if (azCheck && Vector3.Angle(new Vector3(dx, 0f, dz), fwd) > cone) continue;
+                    float brg = Mathf.Atan2(dx, dz);
+                    if (brg < 0f) brg += 2f * Mathf.PI;
+                    int bin = Mathf.Min(Az - 1, (int)(brg * azPerRad)) * Steps + Mathf.Min(Steps - 1, (int)(Mathf.Sqrt(d2) * binsPerM));
+                    float agl = Mathf.Max(0f, p.Mask[bin] - p.Height[bin]);
+                    int k = z * n + x;
+                    if (agl < hide[k]) hide[k] = agl;
+                }
+            }
+            return hide;
+        }
+
+        private static float[] ParseBands(string text)
+        {
+            var list = new List<float>();
+            foreach (string part in (text ?? "").Split(','))
+                if (float.TryParse(part.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float v) && v >= 5f)
+                    list.Add(v);
+            list.Sort();
+            return list.Count > 0 ? list.ToArray() : new[] { 30f, 150f, 500f };
+        }
+
         // =====================================================================
         // Mouse: scroll = zoom about the cursor, drag = pan
         // =====================================================================
@@ -709,16 +1013,18 @@ namespace AutopilotMod
                     e.Use();
                     return true;
                 case EventType.MouseDown when e.button == 0:
-                    if (ClickContact(mp))
+                    // WPT mode: a click (press and release without dragging) drops a waypoint instead
+                    if (!wptMode && ClickContact(mp))
                     {
                         e.Use();
                         return true;
                     }
                     panning = true;
-                    lastMouse = mp;
+                    lastMouse = downPos = mp;
                     e.Use();
                     return true;
                 case EventType.MouseDrag when panning:
+                    if (wptMode && (mp - downPos).magnitude < 6f) return true; // not a drag yet
                     Vector2 d = mp - lastMouse;
                     lastMouse = mp;
                     follow = false;
@@ -728,6 +1034,8 @@ namespace AutopilotMod
                     return true;
                 case EventType.MouseUp when panning:
                     panning = false;
+                    if (wptMode && (mp - downPos).magnitude < 6f)
+                        AddWaypoint(viewX + (mp.x - screen.center.x) * mPerScreenPx, viewZ - (mp.y - screen.center.y) * mPerScreenPx);
                     e.Use();
                     return true;
             }
@@ -802,6 +1110,8 @@ namespace AutopilotMod
             }
             GUI.color = savedCol;
 
+            DrawRoute();
+
             // own jet: dot + heading stick
             GlobalPosition g = me.GlobalPosition();
             Vector2 c = ToScreen(g.x, g.z);
@@ -815,8 +1125,8 @@ namespace AutopilotMod
 
             DrawLegends();
 
-            // bottom status line: what is shown + colour key
-            Fill(Sc(0f, 0.92f, 1f, 0.08f), LegendBack, 0f);
+            // status line (above the bottom OSB legends): what is shown + colour key
+            Fill(Sc(0f, 0.835f, 1f, 0.065f), LegendBack, 0f);
             bool noRadar = Current == Mode.Own && ownRadarMissing;
             bool ownJammed = !noRadar && me.radar != null && profiles.TryGetValue(me.radar, out Profile op) && op.Jammed;
             string status = grid != null && !grid.Ready ? $"MAPPING TERRAIN {grid.Progress * 100f:F0}%"
@@ -824,11 +1134,76 @@ namespace AutopilotMod
                 : Current == Mode.Own
                 ? (noRadar ? "NO RADAR" : ownJammed ? "OWN RDR JAMMED" : me.radar.activated ? "OWN RDR" : "OWN RDR OFF")
                 : (Current == Mode.Enemy ? $"{siteCount} ENMY RDR" : $"{siteCount} RDR SITES") + (jammedCount > 0 ? $" {jammedCount} JAM" : "");
-            Text(Sc(0.02f, 0.92f, 0.5f, 0.08f), status, 0.03f, noRadar || (Current == Mode.Own ? ownJammed : jammedCount > 0) ? Amber : Green, TextAnchor.MiddleLeft);
-            Color green = new Color(0.35f, 0.95f, 0.45f), red = new Color(1f, 0.3f, 0.25f);
+            Text(Sc(0.02f, 0.835f, 0.5f, 0.065f), status, 0.03f, noRadar || (Current == Mode.Own ? ownJammed : jammedCount > 0) ? Amber : Green, TextAnchor.MiddleLeft);
+            if (routeInfo != null || nav.Points.Count > 0)
+            {
+                string info = routeInfo ?? (nav.Planned ? "RTE" : $"{nav.Points.Count} WPT{(nav.Points.Count == 1 ? "" : "S")}");
+                if (wptMode) info += " - CLICK MAP";
+                Fill(Sc(0f, 0.775f, 1f, 0.06f), LegendBack, 0f);
+                Text(Sc(0.02f, 0.775f, 0.96f, 0.06f), info, 0.026f, RouteCol, TextAnchor.MiddleLeft);
+            }
+            else if (wptMode)
+            {
+                Fill(Sc(0f, 0.775f, 1f, 0.06f), LegendBack, 0f);
+                Text(Sc(0.02f, 0.775f, 0.96f, 0.06f), "WPT - CLICK MAP TO ADD", 0.026f, RouteCol, TextAnchor.MiddleLeft);
+            }
             bool en = Current == Mode.Enemy;
-            Text(Sc(0.5f, 0.92f, 0.48f, 0.08f), "SEEN", 0.026f, en ? red : green, TextAnchor.MiddleLeft);
-            Text(Sc(0.66f, 0.92f, 0.32f, 0.08f), "HIDDEN", 0.026f, en ? green : red, TextAnchor.MiddleRight);
+            if (cfg.RadarTargetAgl.Value == MaskView)
+            {
+                // colour key: masking height bands (m above ground, display units)
+                Text(Sc(0.5f, 0.835f, 0.16f, 0.065f), en ? "HIDE <" : "SEES >", 0.022f, Green, TextAnchor.MiddleLeft);
+                for (int i = 0; i < MaskBands.Length; i++)
+                {
+                    Color32 mc = MaskCols[en ? i : MaskBands.Length - 1 - i];
+                    Rect r = Sc(0.64f + i * 0.07f, 0.845f, 0.065f, 0.045f);
+                    Fill(r, new Color32(mc.r, mc.g, mc.b, 255), 0f);
+                    float lo = i == 0 ? 0f : MaskBands[i - 1];
+                    Text(r, lo < 1000f ? $"{Units.Alt(lo):0}" : $"{Units.Alt(lo) / 1000f:0}K", 0.018f, Black, TextAnchor.MiddleCenter, false);
+                }
+            }
+            else
+            {
+                Color green = new Color(0.35f, 0.95f, 0.45f), red = new Color(1f, 0.3f, 0.25f);
+                Text(Sc(0.5f, 0.835f, 0.48f, 0.065f), "SEEN", 0.026f, en ? red : green, TextAnchor.MiddleLeft);
+                Text(Sc(0.66f, 0.835f, 0.32f, 0.065f), "HIDDEN", 0.026f, en ? green : red, TextAnchor.MiddleRight);
+            }
+        }
+
+        private static readonly Color RouteCol = new Color(1f, 0.35f, 0.95f, 1f);
+        private static readonly Color RouteDim = new Color(1f, 0.35f, 0.95f, 0.45f);
+
+        /// <summary>Route legs (active leg bright, flown legs dim), waypoints, leg heights, destination.</summary>
+        private void DrawRoute()
+        {
+            if (nav.Points.Count == 0) return;
+            float lw = Mathf.Max(1.5f, 0.004f * S);
+            nav.LegStart(out float sx0, out float sz0);
+            if (nav.Active == 0)
+            {
+                GlobalPosition g = me.GlobalPosition();
+                sx0 = nav.Planned ? nav.StartX : g.x;
+                sz0 = nav.Planned ? nav.StartZ : g.z;
+            }
+            float px = nav.Active == 0 ? sx0 : nav.Points[0].X, pz = nav.Active == 0 ? sz0 : nav.Points[0].Z;
+            for (int i = nav.Active == 0 ? 0 : 1; i < nav.Points.Count; i++)
+            {
+                Waypoint w = nav.Points[i];
+                bool flown = i < nav.Active;
+                Line(ToScreen(px, pz), ToScreen(w.X, w.Z), i == nav.Active ? lw * 1.6f : lw, flown ? RouteDim : RouteCol);
+                if (!float.IsNaN(w.Agl) && !flown)
+                {
+                    Vector2 mid = (ToScreen(px, pz) + ToScreen(w.X, w.Z)) * 0.5f;
+                    Text(new Rect(mid.x - 0.05f * S, mid.y - 0.03f * S, 0.1f * S, 0.025f * S), $"{Units.Alt(w.Agl):0}", 0.02f, RouteCol, TextAnchor.MiddleCenter, false);
+                }
+                px = w.X;
+                pz = w.Z;
+            }
+            for (int i = 0; i < nav.Points.Count; i++)
+            {
+                Vector2 c = ToScreen(nav.Points[i].X, nav.Points[i].Z);
+                float r = i == nav.Points.Count - 1 ? 5f : 3f;
+                Fill(new Rect(c.x - r, c.y - r, 2f * r, 2f * r), i < nav.Active ? RouteDim : RouteCol, i == nav.Points.Count - 1 ? 0f : r);
+            }
         }
 
         /// <summary>Global x/z -> position inside the screen rect (0,0 = its top-left).</summary>
@@ -881,7 +1256,7 @@ namespace AutopilotMod
                     DrawArrow(r, b, b.Glyph == Glyph.Up);
                     continue;
                 }
-                TextAnchor anchor = b.Side == Side.Left ? TextAnchor.MiddleLeft : TextAnchor.UpperCenter;
+                TextAnchor anchor = b.Side == Side.Left ? TextAnchor.MiddleLeft : b.Side == Side.Bottom ? TextAnchor.LowerCenter : TextAnchor.UpperCenter;
                 string label;
                 bool boxed = false;
                 switch (b.Command)
@@ -889,7 +1264,14 @@ namespace AutopilotMod
                     case ApCommand.RdrAll: label = "ALL"; boxed = Current == Mode.All; break;
                     case ApCommand.RdrOwn: label = "OWN"; boxed = Current == Mode.Own; break;
                     case ApCommand.RdrEnemy: label = "ENMY"; boxed = Current == Mode.Enemy; break;
-                    case ApCommand.RdrTgt: label = cfg.RadarTargetAgl.Value < 0f ? "TGT ALT" : $"TGT {cfg.RadarTargetAgl.Value:F0}"; break;
+                    case ApCommand.RdrTgt:
+                        label = cfg.RadarTargetAgl.Value == MaskView ? "TGT MASK" : cfg.RadarTargetAgl.Value < 0f ? "TGT ALT" : $"TGT {cfg.RadarTargetAgl.Value:F0}";
+                        break;
+                    case ApCommand.RteWpt: label = "WPT"; boxed = wptMode; break;
+                    case ApCommand.RteUndo: label = "UNDO"; break;
+                    case ApCommand.RteClear: label = "CLR"; break;
+                    case ApCommand.RtePlan: label = "RTE"; boxed = nav.Planned && nav.Has; break;
+                    case ApCommand.NavToggle: label = "NAV"; boxed = NavActive != null && NavActive(); break;
                     case ApCommand.RdrHide: label = "HIDE"; break;
                     case ApCommand.RdrFollow: label = "FOLW"; boxed = follow; break;
                     case ApCommand.RdrRcsOwn:

@@ -14,6 +14,7 @@
     <Compile Include="..\src\RateLoop.cs" />
     <Compile Include="..\src\NavGuidance.cs" />
     <Compile Include="..\src\RoutePlanner.cs" />
+    <Compile Include="..\src\CoverageMath.cs" />
   </ItemGroup>
 
 </Project>

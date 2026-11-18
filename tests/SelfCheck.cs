@@ -81,6 +81,11 @@ internal static class SelfCheck
         float lead = L1Guidance.TurnLead(200f, 35f, 90f, 50000f);
         Check(lead > 5000f && lead < 6000f, $"turn lead for a 90 deg turn at 200 m/s, 35 deg bank = R ({lead:F0} m)");
 
+        // ---- radar masking heights ----
+        CheckMaskHeights();
+        Check(Near(CoverageMath.DetectRange(10000f, 1f, 1f), 10000f) && Near(CoverageMath.DetectRange(10000f, 1f, 16f), 20000f)
+              && Near(CoverageMath.DetectRange(10000f, 1f, 1000f), 20000f), "detect range: rcs^0.25, capped at 2x maxRange");
+
         // ---- route planner ----
         CheckPlanner();
 
@@ -282,5 +287,50 @@ internal static class SelfCheck
         estRatio = axis.Rls.Ratio;
         saturated = satTicks > 50;
         return (float)Math.Sqrt(err2 / Math.Max(1, n));
+    }
+
+    /// <summary>
+    /// The masking height must give exactly the old line-of-sight answer (steepest-slope sweep plus
+    /// the curved-earth horizon) for any target height, on random terrain.
+    /// </summary>
+    private static void CheckMaskHeights()
+    {
+        const int az = 4, steps = 300;
+        const float step = 200f, radarAlt = 120f;
+        var rnd = new Random(7);
+        var height = new float[az * steps];
+        var before = new float[az * steps];
+        for (int a = 0; a < az; a++)
+        {
+            float h = 50f;
+            for (int i = 0; i < steps; i++)
+            {
+                h = Math.Max(0f, h + (float)(rnd.NextDouble() - 0.5) * 60f);
+                height[a * steps + i] = h;
+                // a ridge inside some bins
+                before[a * steps + i] = rnd.NextDouble() < 0.1 ? (h + 40f - radarAlt) / (i * step + step * 0.5f) : float.NegativeInfinity;
+            }
+        }
+        var mask = (float[])before.Clone();
+        CoverageMath.MaskHeights(height, mask, radarAlt, step, az, steps);
+        float radarHorizon = (float)Math.Sqrt(CoverageMath.TwoR * radarAlt);
+        int mismatches = 0;
+        foreach (float agl in new[] { 5f, 30f, 150f, 500f, 2000f })
+        for (int a = 0; a < az; a++)
+        {
+            float maxSlope = float.NegativeInfinity;
+            for (int i = 0; i < steps; i++)
+            {
+                int k = a * steps + i;
+                float d = (i + 1) * step, tgt = height[k] + agl;
+                maxSlope = Math.Max(maxSlope, before[k]);
+                bool hiddenOld = (tgt - radarAlt) / d < maxSlope || radarHorizon + Math.Sqrt(CoverageMath.TwoR * Math.Max(0f, tgt)) < d;
+                bool hiddenNew = tgt < mask[k];
+                // exact boundary hits can round either way; anything else is a real mismatch
+                if (hiddenOld != hiddenNew && Math.Abs(tgt - mask[k]) > 0.01f) mismatches++;
+                maxSlope = Math.Max(maxSlope, (height[k] - radarAlt) / d);
+            }
+        }
+        Check(mismatches == 0, $"masking height reproduces the line-of-sight sweep ({mismatches} mismatches)");
     }
 }

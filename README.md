@@ -125,8 +125,16 @@ the A/T left it.
   (wingtips, nose, tail, gear) at least `GroundFloorMeters` (1.5 m) above the surface.
 - **Bank limit.** Near the water, bank is limited so the low wingtip can't dip in. The MFD shows
   `BANK LIM - LOW` while this is active, so heading changes are slow down there.
-- **No forward look.** The floor can't see terrain ahead, so RALT over hills is still on you.
-  The terrain warning below covers that.
+- **Pull-up-limited sink.** Further from the floor, the sink rate is limited to what a
+  `FloorPullUpG` (1 g) pull-up can still stop at the floor. Close in, the old linear limit
+  (`FloorGain`) applies.
+- **Terrain look-ahead** (`TerrainLookahead`, on by default). Every physics tick, 12 rays sample
+  terrain, ship decks and the sea along the predicted ground track, including the current turn,
+  out to `LookaheadSeconds` (15 s). The A/P starts climbing early enough to clear what it finds.
+  It plans with a 1 s reaction, a `FloorPullUpG` pull, and no steeper than `MaxFlightPathAngle`.
+  The MFD shows `TERRAIN AHEAD - CLIMB` while the look-ahead is commanding the climb. It works in
+  every vertical mode, so BALT over mountains climbs too. The terrain warning below is still
+  there as a backstop.
 
 **Terrain warning ("Terrain, pull up").** This is on whether or not the A/P is engaged.
 - **How it decides.** Each physics tick it looks along your velocity vector for terrain, ships,
@@ -146,8 +154,69 @@ the A/T left it.
 - **When it stays quiet.** Level sea skimming never triggers it. Shallow descents with the gear
   down (landing approaches) don't either, unless you set `WarnWithGearDown`.
 
+**Autothrottle energy coupling** (`EnergyCoupling`). With the A/P and the A/T both engaged, the
+A/T adds throttle as soon as the A/P commands a climb or a banked turn, instead of waiting for
+the speed to bleed off. The amount is set by `ClimbFeedforward` and `TurnFeedforward`. This is
+the energy idea behind TECS, used by PX4 and ArduPilot. **Speed protection** (`SpeedProtection`):
+if the A/T is already at `MaxThrottle` and the speed still falls well below target, the A/P climbs
+only what the engines can sustain. If needed it descends to regain speed (`SPD PROT` on the MFD).
+The terrain floor always wins.
+
+**Rate loops: INDI and in-flight learning.**
+- **INDI law** (`Tuning.RateLoops`, `Law = Indi`, the default). The innermost pitch and roll
+  loops use incremental nonlinear dynamic inversion. Each tick the A/P moves the stick by the
+  increment that should produce the missing rate acceleration, using the measured response.
+  Trim, store loads and fly-by-wire model errors need no integrator.
+- **Rollback.** `Law = Classic` restores the previous feedforward + PI law.
+- **Learning the airframe** (`AdaptiveEffectiveness`). For both laws, a recursive-least-squares
+  estimator learns how much pitch and roll rate the stick really gives on the jet you are flying.
+  It learns from your own stick inputs as well as the A/P's.
+- **Check the estimate.** DATA shows the law and the learned ratios, e.g. `INDI x1.08/0.93`
+  (1 = the fly-by-wire model was exact).
+
 The A/P refuses to engage when the jet is on the ground, below 50 m/s, banked more than 60°, or
 pitched more than 45°. Rotorcraft have their own limits; see below.
+
+## Routes and NAV mode (radar page)
+
+The radar MFD's bottom row plans and flies routes:
+
+| Button | What it does |
+|--------|--------------|
+| **WPT** | Toggle waypoint entry: while lit, a click on the map adds a waypoint (dragging still pans). The last waypoint is the destination. |
+| **UNDO** | Remove the last waypoint (or a planned route). |
+| **CLR** | Clear the route. |
+| **RTE** | Plan a radar-avoiding route from your position to the destination. |
+| **NAV** | Fly the route with the A/P (lateral mode NAV). HDG or a heading rocker leaves it. |
+
+- **Hand-placed waypoints** are flown leg by leg. Your vertical mode is left alone.
+- **How RTE plans.** RTE uses the enemy radars your side knows about, at their known positions.
+  It plans for your own RCS (or the `RadarEnemyRcs` you set). It searches map cells × height
+  bands (`RouteHeightBands`, default 30/150/500 m above ground) with Lazy Theta*, an any-angle
+  grid search. Being seen costs `RouteExposureWeight` seconds per second, and flying low costs a
+  little (`RouteLowFlightPenalty`). So the route goes around radars, or drops into terrain
+  masking where that is shorter, and stays higher where it can.
+- **Planned legs** carry their height. NAV sets RALT and follows it leg by leg (`RALT RTE` on the
+  MFD). It descends early for a lower leg and climbs after the waypoint. Touching the vertical
+  rockers or a vertical mode takes the height back.
+- **Re-planning.** A planned route is re-planned from your position when the known enemy radar
+  picture changes: a new or lost site, a moved one, or a jam state (`AutoReplan`, at most every
+  10 s).
+- **Flying the route.** NAV uses L1 path following, sized so the jet's turn radius at `MaxBank`
+  can't make it circle. It turns onto the next leg a turn-radius before each waypoint, so turns
+  roll out on the new leg. The A/P MFD shows the waypoint number and the distance to go.
+- The planner runs on a worker thread. The radar page keeps mapping terrain and sweeping enemy
+  radars in the background while a planned route is active, even when the page is hidden.
+
+**TGT MASK** (the TGT button cycles to it) draws the **masking height**: the lowest height above
+the ground that the radars can see at each spot.
+- **In ENMY:** fly below it to stay hidden. Red is seen even at 5 m; green is hidden up to 2 km.
+- **In ALL/OWN:** an intruder below it slips under your radars.
+- **It errs low.** Clutter and the cone's elevation limits are ignored, so the map is
+  conservative for hiding.
+- **How it's computed.** Each radar sweep is reduced once to a masking height per range bin.
+  The normal views are now one comparison per bin, and the self-check confirms the result is
+  identical to the old line-of-sight sweep.
 
 ## Rotorcraft (Chicane, Ibis, Tarantula)
 
@@ -254,6 +323,13 @@ and the raw stick outputs.
 | Settles a bit off bank target | Raise `RollRateIntegral` |
 | Speed hunts with A/T | Raise `SpeedDamping`, or lower `SpeedGain` |
 | A/T lights the afterburner | Lower `MaxThrottle` |
+| Nose or wings buzz on the INDI law | Lower `IndiIncrementGain` or `IndiPitchBandwidth` / `IndiRollBandwidth`, or set `Law = Classic` |
+| Rate loops sluggish on INDI | Raise `IndiPitchBandwidth` / `IndiRollBandwidth` |
+| Speed sags in climbs or turns with A/P + A/T | Raise `ClimbFeedforward` / `TurnFeedforward` |
+| Speed rises in climbs with A/P + A/T | Lower `ClimbFeedforward` |
+| Look-ahead climbs too early / too late | Raise / lower `FloorPullUpG` (keep it below what the jet can pull) |
+| NAV wanders across the track / turns too hard | Raise / lower `L1Period` |
+| Routes detour too far / go too close | Lower / raise `RouteExposureWeight` |
 
 ## Files
 
@@ -273,5 +349,16 @@ and the raw stick outputs.
 - `src/SoundBank.cs`: loads the optional custom warning sounds.
 - `src/Units.cs`, `src/ApCommand.cs`, `src/DisconnectTone.cs`: helpers.
 - `src/ApMath.cs`: the control laws' pure arithmetic (no Unity or game types).
-- `tests/`: self-check of `ApMath.cs` plus a small offline model of the helicopter height loop.
-  Run it with `dotnet run --project tests`; it needs no game files.
+- `src/RateLoop.cs`: in-flight effectiveness estimator (RLS) and the INDI rate loop.
+- `src/NavGuidance.cs`: the route model and L1 path following.
+- `src/RoutePlanner.cs`: the Lazy Theta* radar-avoiding route planner.
+- `src/CoverageMath.cs`: masking heights and detection range for the radar page.
+- `tests/`: self-check of the pure code (no game files needed). Run it with
+  `dotnet run --project tests`. It includes offline models of:
+  - the helicopter height loop;
+  - INDI + RLS on a rate-command airframe, over response times of 0.1-0.6 s, delays of 0-60 ms
+    and effectiveness errors of 0.5-2x;
+  - a terrain look-ahead ridge crossing;
+  - L1 intercepts and reversals;
+  - route planning around a radar and through a masking valley;
+  - masking heights against the old line-of-sight sweep.
