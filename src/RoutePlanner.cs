@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace AutopilotMod
 {
     /// <summary>
-    /// Radar-avoiding route planner: Lazy Theta* (Nash, Daniel and Koenig 2010) over a grid of map
+    /// Radar-avoiding route planner: Lazy Theta* (Nash, Koenig and Tovey, AAAI 2010) over a grid of map
     /// cells x height bands. Pure arithmetic on arrays, so it runs on a worker thread and in tests.
     ///
     /// Inputs per cell: Hide = the highest height above ground (m) at which no known enemy radar can see
