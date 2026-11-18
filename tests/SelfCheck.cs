@@ -2,7 +2,8 @@ using System;
 using AutopilotMod;
 
 /// <summary>
-/// Assert-based checks of src/ApMath.cs, plus a small offline model of the helicopter height loop.
+/// Assert-based checks of src/ApMath.cs, plus small offline models of the helicopter height loop
+/// and of terrain following.
 /// Exit code 0 = all passed. Run: dotnet run --project tests
 /// </summary>
 internal static class SelfCheck
@@ -45,6 +46,69 @@ internal static class SelfCheck
         Check(ApMath.Agility(1f, 0.7f, 0.4f) == 1f && Near(ApMath.Agility(0.3f, 0.7f, 0.4f), 0.4286f) && ApMath.Agility(0.1f, 0.7f, 0.4f) == 0.4f,
             "agility is 1 for fighters, proportional below, floored");
 
+        // ---- route hand edits (web map / planner): never into flown legs, neighbour's height and speed ----
+        {
+            var r = new NavRoute();
+            r.Replace(new System.Collections.Generic.List<Waypoint> { new Waypoint(0f, 1000f, 100f, 200f), new Waypoint(0f, 2000f, 300f), new Waypoint(0f, 3000f) }, 0f, 0f, true);
+            r.Active = 1;
+            r.Insert(0, 5f, 5f);
+            Check(r.Points.Count == 4 && r.Points[1].X == 5f && r.Points[1].Agl == 300f && !r.Planned, "insert before the active leg lands on it, takes the next point's height, unplans");
+            r.Insert(4, 9f, 9f);
+            Check(r.Points[4].X == 9f && r.DestX == 9f && float.IsNaN(r.Points[4].Agl), "append takes the last point's height and becomes the destination");
+            r.RemoveAt(0);
+            Check(r.Points.Count == 5 && r.Points[0].X == 0f, "a flown point can't be removed");
+            r.SetAgl(2, 1f);
+            r.SetSpeed(2, 0f);
+            Check(r.Points[2].Agl == 2f && float.IsNaN(r.Points[2].Speed), "height floored at 2 m, speed 0 = none");
+        }
+
+        // ---- ETA path distance ----
+        float[] path = { 0f, 4000f, 3000f, 4000f }; // north 4 km, then east 3 km
+        Check(Near(ApMath.PathDistance(path, 0, 300f, 400f, true), 500f), "no route: straight to the target");
+        Check(Near(ApMath.PathDistance(path, 2, 0f, 0f, false), 7000f), "no target: to the route's end");
+        Check(Near(ApMath.PathDistance(path, 2, 1500f, 5000f, true), 6500f), "along the route to abeam the target, then 1 km off");
+        Check(Near(ApMath.PathDistance(path, 2, 3000f, 4000f, true), 7000f), "target on the last waypoint");
+
+        // ---- lift vector: bank and pull from the climb and the turn wanted together ----
+        float lv = 9.81f, ah = 9.81f * (float)Math.Tan(Math.PI / 3);
+        float bk = ApMath.LiftBank(ref lv, ref ah, 80f, 9.81f, out float room);
+        Check(Near(bk * 180f / (float)Math.PI, 60f, 0.1f) && Near(ApMath.LiftAlong(lv, ah, bk), 19.62f, 0.01f), "level 60 deg turn: 2 g at 60 deg bank");
+        lv = -9.81f; ah = 3f * 9.81f; // push-over wanting -1 g while turning at 3 g
+        bk = ApMath.LiftBank(ref lv, ref ah, 80f, 9.81f, out room);
+        float turnAccel = ApMath.LiftAlong(lv, ah, bk) * (float)Math.Sin(bk);
+        Check(Near(bk * 180f / (float)Math.PI, 71.6f, 0.1f) && turnAccel > 2.3f * 9.81f, $"push-over in a turn keeps the level-turn bank and keeps turning: {bk * 180f / Math.PI:F0} deg, {turnAccel / 9.81f:F1} g sideways");
+        lv = 0f; ah = 0.2f * 9.81f; // a small steering correction while unloaded over a crest
+        bk = ApMath.LiftBank(ref lv, ref ah, 80f, 9.81f, out room);
+        Check(bk * 180f / Math.PI < 12f, $"a small correction while pushing stays a small bank: {bk * 180f / Math.PI:F1} deg");
+        lv = -9.81f; ah = 0f;
+        bk = ApMath.LiftBank(ref lv, ref ah, 80f, 9.81f, out room);
+        Check(bk == 0f && Near(ApMath.LiftAlong(lv, ah, bk), -9.81f), "push-over without a turn: wings level, negative g");
+        lv = 78f; ah = 50f;
+        ApMath.LiftBank(ref lv, ref ah, 80f, 9.81f, out room);
+        Check(Near(lv, 78f) && Near(ah, (float)Math.Sqrt(80f * 80f - 78f * 78f), 0.01f) && Near(room, ah, 0.01f), "over budget: the climb keeps its lift, the turn gets the rest");
+
+        // ---- the pull at the bank the jet actually has ----
+        float rad = (float)Math.PI / 180f, cos35 = (float)Math.Cos(35f * rad);
+        float held = ApMath.LiftPull(9.81f, 6f * 9.81f, 35f * rad, 9.81f); // hard turn wanted, bank held at 35 deg by the wingtip limit
+        Check(Near(held * cos35, 9.81f, 0.01f), $"bank held shallow: pulls for level flight ({held / 9.81f:F2} g), not for the turn (it would climb)");
+        float rollOut = ApMath.LiftPull(9.81f, 0f, 70f * rad, 9.81f); // rolling out from 70 deg, no turn wanted
+        Check(Near(rollOut * (float)Math.Cos(70f * rad), 9.81f, 0.01f), "rolling out: keeps its height");
+        float pushTurn = ApMath.LiftPull(-9.81f, 3f * 9.81f, 71.57f * rad, 9.81f);
+        Check(Near(pushTurn, ApMath.LiftAlong(-9.81f, 3f * 9.81f, 71.57f * rad), 0.01f) && pushTurn > 2.4f * 9.81f, "push-over in a turn at its bank: still pulls round");
+        Check(Near(ApMath.LiftPull(-9.81f, 0f, 0f, 9.81f), -9.81f), "push-over wings level: negative g");
+        Check(Near(ApMath.LiftPull(9.81f, 9.81f * (float)Math.Tan(60f * rad), 60f * rad, 9.81f), 19.62f, 0.01f), "at the bank wanted: the full turn, 2 g at 60 deg");
+
+        // ---- lift allocation: vertical first, the turn gets the rest (g = 9.81; 7.2 g of stick) ----
+        float deg = (float)(180.0 / Math.PI);
+        float lvl = ApMath.BankLimit(70.6f, 0f, 9.81f) * deg;
+        Check(lvl > 81.5f && lvl < 83f, $"level turn on the whole budget: {lvl:F1} deg (8.2 g)");
+        Check(ApMath.BankLimit(70.6f, 70.6f, 9.81f) * deg < 1f, "a full pull-up leaves no lift for turning: wings level");
+        Check(Near(ApMath.BankLimit(70.6f, -9.81f, 9.81f) * deg, 90f, 0.1f), "a 0 g push-over may roll to 90 deg");
+        float slow = ApMath.BankLimit(5f, 0f, 9.81f) * deg;
+        Check(slow > 38f && slow < 40f, $"slow jet with little pitch authority banks less: {slow:F1} deg");
+        Check(Near(ApMath.SegmentDistance(0f, 5f, -10f, 0f, 10f, 0f), 5f) && Near(ApMath.SegmentDistance(13f, 4f, -10f, 0f, 10f, 0f), 5f),
+            "segment distance: to the middle, and to an end past it");
+
         // ---- helicopter height loop, light to heavy rotor (m/s^2 of lift per unit of collective) ----
         foreach (float lift in new[] { 8f, 16f, 25f })
         {
@@ -55,6 +119,38 @@ internal static class SelfCheck
             low = HoverModel(lift, 3f, 3f, 1f);
             Check(low > 1.5f, $"lift {lift}: 1 m/s^2 push-down at 3 m sags to {low:F2} m (floor 1.5 m)");
         }
+
+        // ---- terrain following ----
+        Check(float.IsNegativeInfinity(ApMath.TfComfortSlope(-5f, 500f, 0.26f, 8e-5f)), "terrain below needs no climb");
+        Check(float.IsNegativeInfinity(ApMath.TfComfortSlope(50f, 5000f, 0.26f, 8e-5f)), "a far-off hill needs no climb yet");
+        Check(Near(ApMath.TfComfortSlope(40f, 1000f, 0.26f, 8e-5f), 0.08f), "on the approach parabola the slope is kPush * d");
+        Check(ApMath.TfComfortSlope(600f, 1500f, 0.26f, 8e-5f) == 0.26f, "capped at the planned climb angle");
+        bool lim = false;
+        Check(ApMath.TfHardSlope(-100f, 1000f, 0.35f, 2e-4f, ref lim) < -0.15f && !lim, "terrain well below allows a descent");
+        Check(ApMath.TfHardSlope(500f, 1000f, 0.35f, 2e-4f, ref lim) == 0.35f && lim, "an unclimbable wall is flagged");
+
+        // Fighter at 250 m/s on the default g limits and a slow, sluggish heavy at 120 m/s whose airframe caps
+        // them lower, over ridges, a cliff, rolling hills and isolated hills.
+        foreach (bool heavy in new[] { false, true })
+        {
+            float v = heavy ? 120f : 250f;
+            foreach (int terrain in new[] { 0, 1, 2, 3 })
+            {
+                TfModel(v, terrain, 60f, heavy ? 1.5f : 0.8f, heavy ? 0.4f : 1f, heavy ? 2f : 3f, heavy ? 1.5f : 3f, out float low, out float mean, out float crest);
+                string tag = $"TF v={v} terrain {terrain}";
+                Check(low > 54f, $"{tag}: clearance dipped to {low:F1} m (set 60)");
+                Check(mean < (heavy ? 100f : 140f), $"{tag}: mean clearance {mean:F1} m - not following the ground");
+                Check(crest > 50f && crest < 80f, $"{tag}: crossed the highest crest at {crest:F1} m");
+            }
+        }
+
+        // Low and fast: a 30 m clearance must not be eaten by dips at crests.
+        foreach (float v in new[] { 150f, 250f, 400f })
+            foreach (int terrain in new[] { 0, 1, 2, 3 })
+            {
+                TfModel(v, terrain, 30f, 0.8f, 1f, 3f, 3f, out float low, out _, out _);
+                Check(low > 24f, $"TF v={v} terrain {terrain}: clearance dipped to {low:F1} m (set 30)");
+            }
 
 
         // ---- surface floor: linear near it, pull-up-limited (sqrt) further out ----
@@ -107,6 +203,100 @@ internal static class SelfCheck
 
         Console.WriteLine(failures == 0 ? "Self-check passed." : $"{failures} check(s) failed.");
         return failures == 0 ? 0 : 1;
+    }
+
+    private static float TfTerrain(int kind, float x)
+    {
+        switch (kind)
+        {
+            case 0:   // two sharp 400 m ridges with a valley between
+                return 400f * Math.Max(0f, 1f - Math.Abs(x - 12000f) / 1500f) + 400f * Math.Max(0f, 1f - Math.Abs(x - 17000f) / 1500f);
+            case 1:   // 300 m cliff up to a plateau, then a cliff back down
+                return x > 10000f && x < 18000f ? 300f : 0f;
+            case 3:   // isolated rounded 120 m hills, 800 m across, every 3 km
+                if (x < 4500f) return 0f;
+                float dx = (x - 4500f) % 3000f - 1500f;
+                return Math.Abs(dx) < 400f ? 120f * (float)Math.Pow(Math.Cos(Math.PI * dx / 800f), 2) : 0f;
+            default:  // rolling hills, growing out of a plain so the run starts settled
+                return Math.Min(1f, x / 6000f) * (150f + 120f * (float)Math.Sin(x / 900f) + 60f * (float)Math.Sin(x / 310f + 1f));
+        }
+    }
+
+    /// <summary>
+    /// Point-mass jet flown by the same terrain-following law as FlightController.FlyVertical: pitch
+    /// rate command -> pitch -> flight path through a lift lag; agility scales the flight-path gain
+    /// as it does on the heavy jets; pullG/pushG are the g limits (extra g above / below 1g). Returns the lowest and mean
+    /// clearance and the clearance over the highest point of the terrain.
+    /// </summary>
+    private static void TfModel(float v, int terrain, float clearance, float liftLag, float agility, float pullG, float pushG, out float low, out float mean, out float crest)
+    {
+        const float dt = 0.02f, g = 9.81f, smoothing = 0.4f;
+        const int n = 40;
+        const float maxGamma = 20f * (float)Math.PI / 180f, planGamma = 0.75f * maxGamma;
+        float aPullMax = pullG * g, aPushMax = pushG * g, aPull = ApMath.TfPlanG * aPullMax, aPush = ApMath.TfPlanG * aPushMax;
+        var dist = new float[n];
+        var rel = new float[n];
+        float x = 0f, alt = TfTerrain(terrain, 0f) + clearance, gamma = 0f, theta = 0f;
+        float cmd = 0f, cmdPrev = 0f, cmdRate = 0f, gammaPrev = 0f, gammaRate = 0f;
+        float travelled = 0f, altAtSweep = alt, nearSlope = 0f, sinceSweep = 1f;
+        low = float.MaxValue;
+        crest = 0f;
+        float sum = 0f, top = float.MinValue;
+        int ticks = 0;
+        float raltF = clearance;   // FlyVertical's complementary-filtered radar altitude
+        while (x < 40000f)
+        {
+            float ralt = alt - TfTerrain(terrain, x);
+            raltF += v * (float)Math.Sin(gamma) * dt + (ralt - raltF) * Math.Min(1f, 2f * dt);
+            sinceSweep += dt;
+            if (sinceSweep >= 0.1f)
+            {
+                sinceSweep = 0f;
+                travelled = 0f;
+                altAtSweep = alt;
+                float look = Math.Max(1000f, Math.Min(8000f, v * 15f));
+                nearSlope = float.NegativeInfinity;
+                for (int i = 0; i < n; i++)
+                {
+                    dist[i] = ApMath.TfSampleDistance(i, n, look);
+                    rel[i] = TfTerrain(terrain, x + dist[i]) - alt;
+                    if (dist[i] >= 0.5f * v && dist[i] <= 2f * v)
+                        nearSlope = Math.Max(nearSlope, (rel[i] + ralt) / dist[i]);
+                }
+            }
+            float maxVs = v * (float)Math.Sin(planGamma);
+            float vsCmd = ApMath.CaptureProfile(clearance - raltF, 2f * 0.3f, 0.5f * aPull, maxVs) + ApMath.TfDescentFeedforward(nearSlope, v);
+            vsCmd = Math.Max(-maxVs, Math.Min(maxVs, vsCmd));
+            float slope = ApMath.TfSlope(dist, rel, n, travelled, alt - altAtSweep, clearance, v, gamma,
+                planGamma, maxGamma, aPull, aPush, 1f, out _);
+            if (!float.IsNegativeInfinity(slope)) vsCmd = Math.Max(vsCmd, v * (float)Math.Sin(slope));
+            float target = (float)Math.Asin(Math.Max(-Math.Sin(maxGamma), Math.Min(Math.Sin(maxGamma), vsCmd / v)));
+            float slew = Math.Min((target > cmd ? aPullMax : aPushMax) / v, Math.Abs(target - cmd) / smoothing);
+            cmd += Math.Sign(target - cmd) * Math.Min(Math.Abs(target - cmd), slew * dt);
+            cmdRate += ((cmd - cmdPrev) / dt - cmdRate) * (dt / (0.2f + dt));
+            cmdPrev = cmd;
+            gammaRate += ((gamma - gammaPrev) / dt - gammaRate) * (dt / (0.2f + dt));
+            gammaPrev = gamma;
+            float q = 2f * agility * (cmd - gamma) - 2.5f * (gammaRate - cmdRate) + cmdRate;
+            q = Math.Max(-aPushMax / v, Math.Min(aPullMax / v, q));
+            theta += q * dt;
+            gamma += (theta - gamma) * dt / liftLag;
+            x += v * (float)Math.Cos(gamma) * dt;
+            alt += v * (float)Math.Sin(gamma) * dt;
+            travelled += v * (float)Math.Cos(gamma) * dt;
+
+            float h = TfTerrain(terrain, x);
+            float c = alt - h;
+            if (x > 2000f) low = Math.Min(low, c);   // skip the start-up transient
+            sum += c;
+            ticks++;
+            if (h > top + 0.01f)
+            {
+                top = h;
+                crest = c;
+            }
+        }
+        mean = sum / ticks;
     }
 
     /// <summary>

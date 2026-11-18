@@ -3,12 +3,13 @@ using System.Collections.Generic;
 
 namespace AutopilotMod
 {
-    /// <summary>One route point on the map: global x (east) / z (north) in metres, and the height
-    /// above ground to fly the leg that ENDS here (NaN = no height; the vertical mode is left alone).</summary>
+    /// <summary>One route point on the map: global x (east) / z (north) in metres, the height above
+    /// ground to fly the leg that ENDS here (NaN = no height; the vertical mode is left alone) and the
+    /// A/T speed for that leg (m/s; NaN = leave the speed alone).</summary>
     internal struct Waypoint
     {
-        public float X, Z, Agl;
-        public Waypoint(float x, float z, float agl = float.NaN) { X = x; Z = z; Agl = agl; }
+        public float X, Z, Agl, Speed;
+        public Waypoint(float x, float z, float agl = float.NaN, float speed = float.NaN) { X = x; Z = z; Agl = agl; Speed = speed; }
     }
 
     /// <summary>
@@ -44,6 +45,66 @@ namespace AutopilotMod
             StartX = startX;
             StartZ = startZ;
             Planned = planned;
+            Version++;
+        }
+
+        // ---- hand edits (web map, flight planner): indices into Points; a planned route edited by hand
+        // stops being re-planned, so the planner can't undo the edit ----
+
+        /// <summary>Insert a point at <paramref name="at"/> (Points.Count = append) with its neighbour's height and speed.</summary>
+        public void Insert(int at, float x, float z)
+        {
+            at = Math.Max(Active, Math.Min(at, Points.Count)); // never into the legs already flown
+            Waypoint near = at > Active ? Points[at - 1] : at < Points.Count ? Points[at] : new Waypoint(x, z);
+            Points.Insert(at, new Waypoint(x, z, near.Agl, near.Speed));
+            if (at == Points.Count - 1)
+            {
+                DestX = x;
+                DestZ = z;
+            }
+            Edited();
+        }
+
+        public void RemoveAt(int i)
+        {
+            if (i < Active || i >= Points.Count) return;
+            Points.RemoveAt(i);
+            Edited();
+        }
+
+        public void Move(int i, float x, float z)
+        {
+            if (i < Active || i >= Points.Count) return;
+            Waypoint w = Points[i];
+            w.X = x;
+            w.Z = z;
+            Points[i] = w;
+            Edited();
+        }
+
+        /// <summary>Height for the leg to point i (m above ground; NaN clears it).</summary>
+        public void SetAgl(int i, float m)
+        {
+            if (i < Active || i >= Points.Count) return;
+            Waypoint w = Points[i];
+            w.Agl = float.IsNaN(m) ? m : Math.Max(2f, Math.Min(m, 10000f));
+            Points[i] = w;
+            Edited();
+        }
+
+        /// <summary>A/T speed for the leg to point i (m/s; NaN or 0 clears it).</summary>
+        public void SetSpeed(int i, float ms)
+        {
+            if (i < Active || i >= Points.Count) return;
+            Waypoint w = Points[i];
+            w.Speed = float.IsNaN(ms) || ms <= 0f ? float.NaN : Math.Min(ms, 1000f);
+            Points[i] = w;
+            Edited();
+        }
+
+        private void Edited()
+        {
+            Planned = false;
             Version++;
         }
 

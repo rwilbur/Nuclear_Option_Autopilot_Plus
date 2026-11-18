@@ -26,6 +26,9 @@ namespace AutopilotMod
 
         public bool Active { get; private set; }
 
+        /// <summary>Silences the audio call-outs (MFD SND button); the PULL UP cue still shows.</summary>
+        public bool Muted { get; set; }
+
         private float lastThreat = -10f, lastCall = -10f, callInterval = 1.8f;
         private int callsThisEvent;
         private volatile bool speaking;
@@ -118,6 +121,7 @@ namespace AutopilotMod
         {
             lastCall = Time.unscaledTime;
             callInterval = 1.8f;
+            if (Muted) return;
             callsThisEvent++;
 
             // 1) user-supplied recording

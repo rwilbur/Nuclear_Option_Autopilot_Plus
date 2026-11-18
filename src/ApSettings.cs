@@ -52,6 +52,13 @@ namespace AutopilotMod
         public ConfigEntry<float> IndiIncrementGain;
         public ConfigEntry<float> IndiFilterHz;
 
+        // ---- terrain following ----
+        public ConfigEntry<float> TfLookAhead;
+        public ConfigEntry<float> TfPullG;
+        public ConfigEntry<float> TfPushG;
+        public ConfigEntry<float> TfMinClearance;
+        public ConfigEntry<float> TfSmoothing;
+
         // ---- lateral ----
         public ConfigEntry<float> HeadingGain;
         public ConfigEntry<float> MaxTurnRate;
@@ -97,6 +104,9 @@ namespace AutopilotMod
         public ConfigEntry<float> RadarY;
         public ConfigEntry<float> RadarTargetAgl;
         public ConfigEntry<float> RadarEnemyRcs, RadarFriendlyRcs;
+        public ConfigEntry<float> RadarOpacity;
+        public ConfigEntry<bool> RadarEyes, RadarSams;
+        public ConfigEntry<float> GunHeatSize, GunHeatX, GunHeatY;
 
         // ---- web mirror ----
         public ConfigEntry<bool> MirrorEnabled;
@@ -106,6 +116,7 @@ namespace AutopilotMod
         public ConfigEntry<int> MirrorFps;
         public ConfigEntry<int> MirrorJpegQuality;
         public ConfigEntry<bool> MirrorFlipVertical;
+        public ConfigEntry<bool> MirrorMapJpeg;
 
         // ---- terrain warning ----
         public ConfigEntry<bool> GpwsEnabled;
@@ -158,12 +169,19 @@ namespace AutopilotMod
             IndiIncrementGain = cfg.Bind(R, "IndiIncrementGain", 0.5f, new ConfigDescription("Indi: share of the computed stick increment applied each physics tick. 1 = textbook INDI; 0.5 kept overshoot under 2% in the self-check model even with a 60 ms airframe delay and a 2x effectiveness error.", new AcceptableValueRange<float>(0.1f, 1f)));
             IndiFilterHz = cfg.Bind(R, "IndiFilterHz", 5f, new ConfigDescription("Indi: low-pass (Hz) on the measured rate acceleration and, to match its lag, on the applied stick.", new AcceptableValueRange<float>(1f, 20f)));
 
+            const string F = "TerrainFollowing";
+            TfLookAhead = cfg.Bind(F, "LookAheadSeconds", 15f, new ConfigDescription("How far ahead TF scans the terrain, in seconds of flight (never less than 1 km or more than 8 km). Longer sees tall terrain sooner.", new AcceptableValueRange<float>(5f, 30f)));
+            TfPullG = cfg.Bind(F, "PullUpG", 3.0f, "TF pull-up limit: extra g above 1g (3.0 = 4 g on the G meter). Not capped by MaxPullG, but never more than 80% of what the airframe's fly-by-wire gives at the current speed. Higher = hugs the terrain closer and starts climbs later.");
+            TfPushG = cfg.Bind(F, "PushOverG", 3.0f, "TF push-over limit across crests and into valleys: g below 1g (1.0 = weightless, 3.0 = -2 g on the G meter). Not capped by MaxPushG; same airframe cap as PullUpG. Higher = follows downslopes closer.");
+            TfMinClearance = cfg.Bind(F, "MinClearanceMeters", 2f, "Lowest clearance target TF accepts (m), never less than 2. The GroundFloorMeters floor still keeps the airframe's lowest point clear. The terrain scan is a row of points, not a solid picture, and TF can dip several metres below the target over sharp crests, so a low target is a real risk.");
+            TfSmoothing = cfg.Bind(F, "Smoothing", 0.4f, new ConfigDescription("Seconds over which TF eases into a change of flight path. Higher = calmer ride with fewer sharp corrections, but it follows the terrain less tightly and dips further below the target over crests. 0 = off.", new AcceptableValueRange<float>(0f, 2f)));
+
             const string L = "Tuning.Lateral";
             HeadingGain = cfg.Bind(L, "HeadingGain", 0.35f, "Heading error (deg) -> commanded turn rate (deg/s).");
             MaxTurnRate = cfg.Bind(L, "MaxTurnRate", 3f, "Largest turn rate HDG mode will command (deg/s). 3 deg/s = standard-rate turn.");
             MaxBank = cfg.Bind(L, "MaxBank", 35f, "Largest bank angle the autopilot will command (deg).");
             BankGain = cfg.Bind(L, "BankGain", 1.2f, "Bank error -> roll rate (1/s). Lower if the wings rock back and forth.");
-            MaxRollRate = cfg.Bind(L, "MaxRollRate", 25f, "Largest roll rate the autopilot will command (deg/s).");
+            MaxRollRate = cfg.Bind(L, "MaxRollRate", 25f, "Largest roll rate the autopilot will command (deg/s). Jets never get more than 80% of the airframe's own full-stick roll rate, so a high value means 'as fast as the jet allows'.");
             RollRateGain = cfg.Bind(L, "RollRateGain", 0.5f, "Proportional feedback on roll-rate error.");
             RollRateIntegral = cfg.Bind(L, "RollRateIntegral", 0.6f, "Roll-rate integral gain (trims out asymmetric loads).");
 
@@ -202,17 +220,24 @@ namespace AutopilotMod
             RadarY = cfg.Bind(D, "RadarPagePositionY", 0.97f, "Radar-coverage display vertical position (0 = top, 1 = bottom).");
             RadarTargetAgl = cfg.Bind(D, "RadarTargetHeight", 150f, "Height above the ground (m) of the target the coverage map is drawn for: 5, 30, 150, 500 or 2000, -1 = ALT: your own altitude above sea level, or -2 = MASK: the masking-height map (how low you must fly to stay unseen). The TGT button cycles it.");
             RadarEnemyRcs = cfg.Bind(D, "RadarEnemyRcs", 0f, new ConfigDescription("Radar cross section the ENMY coverage map is drawn for. 0 = your own aircraft's current RCS (it grows with external stores). The RCS buttons and the web mirror set it.", new AcceptableValueRange<float>(0f, 1000f)));
+            RadarOpacity = cfg.Bind(D, "RadarCoverageOpacity", 0.5f, new ConfigDescription("Opacity of the coverage colours on the radar map (0 = invisible, 1 = solid). The web mirror's slider sets it.", new AcceptableValueRange<float>(0f, 1f)));
             RadarFriendlyRcs = cfg.Bind(D, "RadarFriendlyRcs", 1f, new ConfigDescription("Radar cross section the ALL/OWN coverage maps are drawn for (e.g. a stealthy enemy's). 0 = your own aircraft's current RCS. The RCS buttons and the web mirror set it.", new AcceptableValueRange<float>(0f, 1000f)));
+            RadarEyes = cfg.Bind(D, "RadarShowVisual", true, "Radar map: also show where units spot the target by eye (EYES button).");
+            RadarSams = cfg.Bind(D, "RadarShowSamRings", true, "Radar map: draw anti-air weapon engagement rings (SAM button).");
+            GunHeatSize = cfg.Bind(D, "GunHeatSize", 0.22f, "Gun-heat display size as a fraction of screen height. It shows only in aircraft whose gun can overheat.");
+            GunHeatX = cfg.Bind(D, "GunHeatPositionX", 0.985f, "Gun-heat display horizontal position (0 = left edge, 1 = right edge). Updated when you drag it.");
+            GunHeatY = cfg.Bind(D, "GunHeatPositionY", 0.45f, "Gun-heat display vertical position (0 = top, 1 = bottom). Updated when you drag it.");
             ShowDebug = cfg.Bind(D, "ShowDebugLine", false, "Show commanded vs actual rates and raw stick outputs on the MFD (useful when tuning).");
 
             const string M = "WebMirror";
             MirrorEnabled = cfg.Bind(M, "Enabled", false, "Serve the MFDs as a web page on your local network (open http://<this PC's IP>:<Port> on another computer). Anyone on the network who opens it can press the MFD buttons. Windows Firewall asks once to allow it.");
             MirrorPort = cfg.Bind(M, "Port", 8080, new ConfigDescription("TCP port for the web page.", new AcceptableValueRange<int>(1024, 65535)));
             MirrorResolution = cfg.Bind(M, "Resolution", 1024, new ConfigDescription("Size (px) of the mirrored autopilot MFD image. Capped at the game window's height.", new AcceptableValueRange<int>(256, 2048)));
-            MirrorMapResolution = cfg.Bind(M, "MapResolution", 1440, new ConfigDescription("Size (px) of the mirrored radar-map MFD image. Capped at the game window's height.", new AcceptableValueRange<int>(256, 2160)));
+            MirrorMapResolution = cfg.Bind(M, "MapResolution", 2560, new ConfigDescription("Long side (px) of the mirrored radar map, which takes the browser window's shape. Fits inside the game window.", new AcceptableValueRange<int>(256, 3840)));
             MirrorFps = cfg.Bind(M, "FramesPerSecond", 30, new ConfigDescription("Mirror update rate. Higher costs more CPU and network.", new AcceptableValueRange<int>(1, 60)));
             MirrorJpegQuality = cfg.Bind(M, "JpegQuality", 80, new ConfigDescription("JPEG quality of the mirrored images.", new AcceptableValueRange<int>(10, 100)));
             MirrorFlipVertical = cfg.Bind(M, "FlipVertical", false, "Set to true if the web page shows the MFDs upside down (depends on the graphics API).");
+            MirrorMapJpeg = cfg.Bind(M, "MapAsVideo", false, "Stream the radar map as JPEG frames rendered by the game (the old way) instead of sending its data for the browser to draw. Costs much more CPU; MapResolution, FramesPerSecond and JpegQuality then apply to the map too. Reload the web page after changing it.");
 
             const string W = "TerrainWarning";
             GpwsEnabled = cfg.Bind(W, "Enabled", true, "\"Terrain, pull up\" ground-collision warning. Works with or without the autopilot.");
@@ -240,6 +265,32 @@ namespace AutopilotMod
                 Bump(FlightPathDamping, 1.5f, 2.5f);
                 Bump(GroundFloor, 3f, 1.5f);
                 version.Value = 2;
+            }
+            if (version.Value < 3)
+            {
+                Bump(TfPullG, 1.0f, 3.0f);
+                Bump(TfPushG, 0.5f, 2.0f);
+                version.Value = 3;
+            }
+            if (version.Value < 4)
+            {
+                Bump(TfMinClearance, 20f, 5f);
+                version.Value = 4;
+            }
+            if (version.Value < 5)
+            {
+                Bump(TfPushG, 2.0f, 3.0f);
+                version.Value = 5;
+            }
+            if (version.Value < 6)
+            {
+                if (MirrorMapResolution.Value == 1440) MirrorMapResolution.Value = 2560;
+                version.Value = 6;
+            }
+            if (version.Value < 7)
+            {
+                Bump(TfMinClearance, 5f, 2f);
+                version.Value = 7;
             }
         }
 

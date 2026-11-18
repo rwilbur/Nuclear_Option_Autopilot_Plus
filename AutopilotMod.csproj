@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <Compile Include="src\**\*.cs" />
+    <EmbeddedResource Include="src\planner.html" LogicalName="planner.html" />
   </ItemGroup>
 
   <ItemGroup>
@@ -61,6 +62,10 @@
     </Reference>
     <Reference Include="UnityEngine.UnityWebRequestAudioModule">
       <HintPath>$(ManagedDir)\UnityEngine.UnityWebRequestAudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(ManagedDir)\UnityEngine.JSONSerializeModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.ImageConversionModule">

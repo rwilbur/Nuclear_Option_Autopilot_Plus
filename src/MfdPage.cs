@@ -1,4 +1,5 @@
 using System;
+using BepInEx.Configuration;
 using UnityEngine;
 
 namespace AutopilotMod
@@ -8,19 +9,84 @@ namespace AutopilotMod
     /// side) around a green-phosphor A/P page. Buttons are clickable whenever the mouse cursor is
     /// visible (MFD cursor key, map open, menus); every function also has a hotkey.
     ///
-    ///            T1 A/P   T2 HDG   T3 ATT   T4 BALT  T5 RALT
+    ///            T1 A/P   T2 HDG   T3 ATT   T4 BALT  T5 TF (rotorcraft: RALT)
     ///   L1 STEP  +--------------------------------------+  R1 V/S
     ///   L2 ^     |  heading tape                        |  R2 ^
     ///   L3 HDG   |  mode annunciators / messages        |  R3 ALT
     ///   L4 v     |  attitude indicator                  |  R4 v
-    ///   L5 DATA  |  ALT / SPD / V/S / THR               |  R5 SYNC
+    ///   L5 SET   |  ALT / SPD / V/S / THR               |  R5 SYNC
     ///            +--------------------------------------+
     ///            B1 A/T   B2 v     B3 SPD   B4 ^     B5 HIDE
+    ///
+    /// SET swaps to the settings page: L1 NAV turn style, L2 sound, L3 debug data, L4 reset all (press twice),
+    /// L5 BACK; R1/R5 pick a tunable, R2/R4 change it, R3 puts it back to its default; B5 HIDE.
+    /// Changes go straight into the .cfg (BepInEx saves on every set).
     /// </summary>
     internal sealed class MfdPage : MfdFrame
     {
 
-        protected override Osb[] Buttons => ApButtons;
+        public bool SettingsPage;
+
+        protected override Osb[] Buttons => SettingsPage ? SetButtons : ApButtons;
+
+        private static readonly Osb[] SetButtons =
+        {
+            new Osb { Side = Side.Left, Index = 1, Command = ApCommand.SoundToggle, Glyph = Glyph.Text },
+            new Osb { Side = Side.Left, Index = 2, Command = ApCommand.DataToggle, Glyph = Glyph.Text },
+            new Osb { Side = Side.Left, Index = 3, Command = ApCommand.SetResetAll, Glyph = Glyph.Text },
+            new Osb { Side = Side.Left, Index = 4, Command = ApCommand.SetPage, Glyph = Glyph.Text },
+            new Osb { Side = Side.Right, Index = 0, Command = ApCommand.SetPrev, Glyph = Glyph.Text },
+            new Osb { Side = Side.Right, Index = 1, Command = ApCommand.SetValUp, Glyph = Glyph.Up },
+            new Osb { Side = Side.Right, Index = 2, Command = ApCommand.SetDefault, Glyph = Glyph.Text },
+            new Osb { Side = Side.Right, Index = 3, Command = ApCommand.SetValDown, Glyph = Glyph.Down },
+            new Osb { Side = Side.Right, Index = 4, Command = ApCommand.SetNext, Glyph = Glyph.Text },
+            new Osb { Side = Side.Bottom, Index = 4, Command = ApCommand.Hide, Glyph = Glyph.Text },
+        };
+
+        /// <summary>A config value the settings page can step.</summary>
+        private sealed class Tunable
+        {
+            public string Name, Unit, Fmt, Hint;
+            public ConfigEntry<float> Entry;
+            public float Step, Min, Max;
+        }
+
+        private readonly Tunable[] tunables;
+        private int selected;
+        private float resetArmedUntil;
+
+        private static Tunable T(string name, ConfigEntry<float> e, float step, float min, float max, string fmt, string unit, string hint) =>
+            new Tunable { Name = name, Entry = e, Step = step, Min = min, Max = max, Fmt = fmt, Unit = unit, Hint = hint };
+
+        /// <summary>Settings-page commands; <paramref name="coarse"/> = 5x step (Shift, STEP, or a held button).</summary>
+        public void SettingsCommand(ApCommand cmd, bool coarse)
+        {
+            Tunable t = tunables[selected];
+            switch (cmd)
+            {
+                case ApCommand.SetPrev: selected = (selected + tunables.Length - 1) % tunables.Length; break;
+                case ApCommand.SetNext: selected = (selected + 1) % tunables.Length; break;
+                case ApCommand.SetValUp:
+                case ApCommand.SetValDown:
+                    float step = t.Step * (coarse || ap.CoarseStep ? 5f : 1f);
+                    // rounded to the step so float drift doesn't end up in the .cfg
+                    float next = ApMath.Snap(t.Entry.Value, cmd == ApCommand.SetValUp ? 1 : -1, step);
+                    t.Entry.Value = Mathf.Clamp((float)Math.Round(next / t.Step) * t.Step, t.Min, t.Max);
+                    break;
+                case ApCommand.SetDefault: t.Entry.Value = (float)t.Entry.DefaultValue; break;
+                case ApCommand.SetResetAll:
+                    if (Time.unscaledTime > resetArmedUntil)
+                    {
+                        resetArmedUntil = Time.unscaledTime + 3f; // second press within 3 s confirms
+                        break;
+                    }
+                    resetArmedUntil = 0f;
+                    foreach (Tunable u in tunables) u.Entry.Value = (float)u.Entry.DefaultValue;
+                    cfg.ShowDebug.Value = (bool)cfg.ShowDebug.DefaultValue;
+                    ShowMessage("SETTINGS RESET", false);
+                    break;
+            }
+        }
 
         private static readonly Osb[] ApButtons =
         {
@@ -28,7 +94,7 @@ namespace AutopilotMod
             new Osb { Side = Side.Top, Index = 1, Command = ApCommand.ModeHdg, Glyph = Glyph.Text },
             new Osb { Side = Side.Top, Index = 2, Command = ApCommand.ModeAtt, Glyph = Glyph.Text },
             new Osb { Side = Side.Top, Index = 3, Command = ApCommand.ModeBalt, Glyph = Glyph.Text },
-            new Osb { Side = Side.Top, Index = 4, Command = ApCommand.ModeRalt, Glyph = Glyph.Text },
+            new Osb { Side = Side.Top, Index = 4, Command = ApCommand.ModeTf, Glyph = Glyph.Text },
 
             new Osb { Side = Side.Right, Index = 0, Command = ApCommand.ModeVs, Glyph = Glyph.Text },
             new Osb { Side = Side.Right, Index = 1, Command = ApCommand.VertUp, Glyph = Glyph.Up },
@@ -46,20 +112,36 @@ namespace AutopilotMod
             new Osb { Side = Side.Left, Index = 1, Command = ApCommand.LatUp, Glyph = Glyph.Up },
             new Osb { Side = Side.Left, Index = 2, Command = ApCommand.LatSync, Glyph = Glyph.Readout },
             new Osb { Side = Side.Left, Index = 3, Command = ApCommand.LatDown, Glyph = Glyph.Down },
-            new Osb { Side = Side.Left, Index = 4, Command = ApCommand.DataToggle, Glyph = Glyph.Text },
+            new Osb { Side = Side.Left, Index = 4, Command = ApCommand.SetPage, Glyph = Glyph.Text },
         };
 
         private readonly ApSettings cfg;
         private readonly FlightController ap;
+        private readonly TerrainWarning gpws;
 
         private string message;
         private bool messageWarn;
         private float messageUntil;
 
-        public MfdPage(ApSettings cfg, FlightController ap) : base(cfg.MfdSize, cfg.MfdX, cfg.MfdY)
+        public MfdPage(ApSettings cfg, FlightController ap, TerrainWarning gpws) : base(cfg.MfdSize, cfg.MfdX, cfg.MfdY)
         {
             this.cfg = cfg;
+            this.gpws = gpws;
             this.ap = ap;
+            tunables = new[]
+            {
+                T("TF SMOOTH", cfg.TfSmoothing, 0.1f, 0f, 2f, "0.0", "S", "EASES INTO FLIGHT-PATH CHANGES\nHIGHER = CALMER RIDE, LOOSER FOLLOW"),
+                T("TF LOOK", cfg.TfLookAhead, 1f, 5f, 30f, "0", "S", "HOW FAR AHEAD TF SCANS\n(SECONDS OF FLIGHT, 1-8 KM)"),
+                T("TF PULL", cfg.TfPullG, 0.5f, 0.5f, 9f, "0.0", "G", "TF PULL-UP LIMIT ABOVE 1 G\nHIGHER = HUGS TERRAIN CLOSER"),
+                T("TF PUSH", cfg.TfPushG, 0.5f, 0.5f, 9f, "0.0", "G", "TF PUSH-OVER LIMIT BELOW 1 G\nHIGHER = FOLLOWS DOWNSLOPES CLOSER"),
+                T("TF MIN", cfg.TfMinClearance, 1f, 2f, 100f, "0", "M", "LOWEST CLEARANCE TF ACCEPTS\nLOW OVER LAND IS A REAL RISK"),
+                T("FLOOR", cfg.GroundFloor, 0.5f, 0.5f, 20f, "0.0", "M", "AIRFRAME'S LOWEST POINT IS KEPT\nTHIS HIGH ABOVE THE SURFACE"),
+                T("MAX BANK", cfg.MaxBank, 5f, 10f, 85f, "0", "DEG", "BANK LIMIT\n(FLY-OVER TURNS IGNORE IT)"),
+                T("TURN RATE", cfg.MaxTurnRate, 0.5f, 1f, 30f, "0.0", "DEG/S", "HDG AND FLY-BY NAV TURN RATE\n(FLY-OVER TURNS IGNORE IT)"),
+                T("CLIMB", cfg.MaxClimbRate, 5f, 5f, 150f, "0", "M/S", "BALT / V/S MAX CLIMB\nAND DESCENT RATE"),
+                T("A/T MAX", cfg.AtMaxThrottle, 0.05f, 0.1f, 1f, "0.00", "", "A/T THROTTLE LIMIT\nLOWER KEEPS IT OUT OF BURNER"),
+                T("GPWS TIME", cfg.GpwsReactionTime, 0.25f, 0f, 5f, "0.00", "S", "TERRAIN WARNING LEAD TIME\nHIGHER = EARLIER WARNINGS"),
+            };
         }
 
         public void ShowMessage(string text, bool warning)
@@ -98,6 +180,12 @@ namespace AutopilotMod
 
             DrawOsbLegends(s);
 
+            if (SettingsPage)
+            {
+                DrawSettings();
+                return;
+            }
+
             if (!s.Valid)
             {
                 Text(Sc(0.2f, 0.4f, 0.6f, 0.2f), "NO DATA", 0.05f, Amber, TextAnchor.MiddleCenter);
@@ -125,20 +213,51 @@ namespace AutopilotMod
             {
                 Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), "SPD PROT - CLIMB LIMITED", 0.028f, Amber, TextAnchor.MiddleCenter);
             }
+            else if (apOn && ap.Vertical == VerticalMode.Tf && ap.TfClimbLimited)
+            {
+                Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), "TF CLIMB LIM", 0.028f, Amber, TextAnchor.MiddleCenter);
+            }
             else if (apOn && ap.BankLimitedBySurface)
             {
                 Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), "BANK LIM - LOW", 0.028f, Amber, TextAnchor.MiddleCenter);
             }
+            else if (apOn && ap.EtaText(SceneSingleton<CombatHUD>.i != null ? SceneSingleton<CombatHUD>.i.aircraft : null) is string eta)
+            {
+                Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), eta, 0.028f, Green, TextAnchor.MiddleCenter);
+            }
 
             bool debug = cfg.ShowDebug.Value;
-            DrawAdi(Sc(0.215f, 0.305f, 0.57f, debug ? 0.335f : 0.395f), s, apOn);
-            if (debug) DrawDebug(Sc(0.215f, 0.645f, 0.57f, 0.06f), s);
+            DrawAdi(Sc(0.215f, 0.305f, 0.57f, debug ? 0.32f : 0.395f), s, apOn);
+            if (debug) DrawDebug(Sc(0.215f, 0.63f, 0.57f, 0.08f), s);
 
             // current-value readouts
             DrawReadout(Sc(0.215f, 0.71f, 0.285f, 0.08f), "ALT", $"{Units.Alt(s.Altitude):F0}");
             DrawReadout(Sc(0.5f, 0.71f, 0.285f, 0.08f), "SPD", $"{Units.Speed(s.Speed):F0}");
             DrawReadout(Sc(0.215f, 0.795f, 0.285f, 0.08f), "V/S", $"{Units.Vs(s.VerticalSpeed):+0;-0;0}");
             DrawReadout(Sc(0.5f, 0.795f, 0.285f, 0.08f), "THR", $"{s.Throttle * 100f:F0}%");
+        }
+
+        /// <summary>Settings page: the tunables (amber = changed from default), the selected one boxed, its hint below.</summary>
+        private void DrawSettings()
+        {
+            Text(Sc(0.215f, 0.1f, 0.57f, 0.05f), "SETTINGS", 0.032f, Green, TextAnchor.MiddleCenter);
+            const float top = 0.16f, row = 0.04f;
+            for (int i = 0; i < tunables.Length; i++)
+            {
+                Tunable t = tunables[i];
+                Rect r = Sc(0.215f, top + i * row, 0.57f, row);
+                bool changed = Mathf.Abs(t.Entry.Value - (float)t.Entry.DefaultValue) > 1e-4f;
+                Color c = changed ? Amber : i == selected ? Green : GreenDim;
+                if (i == selected) Border(r, Green, Mathf.Max(1f, 0.003f * S), 0f);
+                Text(new Rect(r.x + 0.01f * S, r.y, r.width * 0.5f, r.height), t.Name, 0.024f, c, TextAnchor.MiddleLeft, i == selected);
+                Text(new Rect(r.center.x, r.y, r.width * 0.5f - 0.01f * S, r.height), $"{t.Entry.Value.ToString(t.Fmt)} {t.Unit}", 0.024f, c, TextAnchor.MiddleRight, i == selected);
+            }
+            Tunable s = tunables[selected];
+            float y = top + tunables.Length * row + 0.015f;
+            Text(Sc(0.215f, y, 0.57f, 0.07f), s.Hint, 0.021f, GreenDim, TextAnchor.UpperCenter, false);
+            Text(Sc(0.215f, y + 0.075f, 0.57f, 0.035f), $"DEFAULT {((float)s.Entry.DefaultValue).ToString(s.Fmt)} {s.Unit}", 0.021f, GreenDim, TextAnchor.UpperCenter, false);
+            if (message != null && Time.unscaledTime < messageUntil)
+                Text(Sc(0.215f, 0.04f, 0.57f, 0.05f), message, 0.026f, messageWarn ? Amber : Green, TextAnchor.MiddleCenter);
         }
 
         private void DrawOsbLegends(FlightState s)
@@ -171,10 +290,23 @@ namespace AutopilotMod
                     case ApCommand.ModeHdg: label = "HDG"; boxed = ap.Lateral == LateralMode.Hdg; break;
                     case ApCommand.ModeAtt: label = "ATT"; boxed = ap.Lateral == LateralMode.Att; break;
                     case ApCommand.ModeBalt: label = "BALT"; boxed = ap.Vertical == VerticalMode.Balt; break;
-                    case ApCommand.ModeRalt: label = "RALT"; boxed = ap.Vertical == VerticalMode.Ralt; break;
+                    case ApCommand.ModeTf:
+                        label = ap.Rotorcraft ? "RALT" : "TF";
+                        boxed = ap.Vertical == VerticalMode.Ralt || ap.Vertical == VerticalMode.Tf;
+                        break;
                     case ApCommand.ModeVs: label = "V/S"; boxed = ap.Vertical == VerticalMode.Vs; break;
                     case ApCommand.StepToggle: label = ap.CoarseStep ? "STEP\nCRSE" : "STEP\nFINE"; break;
-                    case ApCommand.DataToggle: label = "DATA"; boxed = cfg.ShowDebug.Value; break;
+                    case ApCommand.SoundToggle: label = gpws.Muted ? "SND\nOFF" : "SND\nON"; boxed = gpws.Muted; break;
+                    case ApCommand.DataToggle: label = cfg.ShowDebug.Value ? "DATA\nON" : "DATA\nOFF"; boxed = cfg.ShowDebug.Value; break;
+                    case ApCommand.SetPage: label = SettingsPage ? "BACK" : "SET"; break;
+                    case ApCommand.SetResetAll:
+                        bool armed = Time.unscaledTime < resetArmedUntil;
+                        label = armed ? "RESET\nCONFIRM" : "RESET\nALL";
+                        inverse = armed;
+                        break;
+                    case ApCommand.SetPrev: label = "PREV"; break;
+                    case ApCommand.SetNext: label = "NEXT"; break;
+                    case ApCommand.SetDefault: label = "DFLT"; break;
                     case ApCommand.SyncAll: label = "SYNC"; break;
                     case ApCommand.Hide: label = "HIDE"; break;
                     default: label = ""; break;
@@ -199,7 +331,7 @@ namespace AutopilotMod
                     }
                     else if (ap.Lateral == LateralMode.Hdg || ap.Lateral == LateralMode.Nav)
                     {
-                        tag = "HDG";
+                        tag = ap.Lateral == LateralMode.Nav ? "NAV" : "HDG";
                         value = $"{Mathf.Repeat(Mathf.Round(ap.TgtHeading), 360f):000}°";
                     }
                     else
@@ -215,6 +347,7 @@ namespace AutopilotMod
                     {
                         case VerticalMode.Balt: tag = "ALT " + Units.AltUnit; value = $"{Units.Alt(ap.TgtAltitude):F0}"; break;
                         case VerticalMode.Ralt: tag = (ap.RouteVertical ? "RTE " : "RALT ") + Units.AltUnit; value = $"{Units.Alt(ap.TgtRadarAlt):F0}"; break;
+                        case VerticalMode.Tf: tag = (ap.RouteVertical ? "RTE " : "TF ") + Units.AltUnit; value = $"{Units.Alt(ap.TgtRadarAlt):F0}"; break;
                         default: tag = "V/S " + Units.VsUnit; value = $"{Units.Vs(ap.TgtVs):+0;-0;0}"; break;
                     }
                     break;
@@ -235,7 +368,8 @@ namespace AutopilotMod
         {
             float w = r.width / 3f;
             string lat = ap.Lateral == LateralMode.Hdg ? "HDG SEL" : ap.Lateral == LateralMode.Nav ? "NAV" : "ATT HLD";
-            string vert = ap.Vertical == VerticalMode.Balt ? "ALT HLD" : ap.Vertical == VerticalMode.Ralt ? (ap.RouteVertical ? "RALT RTE" : "RALT HLD") : "V/S";
+            string vert = ap.Vertical == VerticalMode.Balt ? "ALT HLD" : ap.Vertical == VerticalMode.Ralt ? (ap.RouteVertical ? "RALT RTE" : "RALT HLD")
+                : ap.Vertical == VerticalMode.Tf ? (ap.RouteVertical ? "TF RTE" : "TERR FLW") : "V/S";
             Annunciator(new Rect(r.x, r.y, w, r.height), lat, apOn);
             Annunciator(new Rect(r.x + w, r.y, w, r.height), vert, apOn);
             Annunciator(new Rect(r.x + 2f * w, r.y, w, r.height), ap.Rotorcraft && ap.TgtSpeed == 0f ? "HVR HLD" : "SPD", ap.AtEngaged);
@@ -263,10 +397,14 @@ namespace AutopilotMod
             string learned = ap.Rotorcraft || !cfg.AdaptiveEffectiveness.Value ? "" : $" x{ap.PitchAxis.Rls.Ratio:0.00}/{ap.RollAxis.Rls.Ratio:0.00}";
             string l2 = $"Q {ap.CmdQ * Mathf.Rad2Deg:+0.0;-0.0}/{s.PitchRate * Mathf.Rad2Deg:+0.0;-0.0} P {ap.CmdP * Mathf.Rad2Deg:+0;-0}/{s.RollRate * Mathf.Rad2Deg:+0;-0} {fbw}{law}{learned}";
             string l3 = $"STK P{ap.OutPitch:+0.00;-0.00} R{ap.OutRoll:+0.00;-0.00} T{ap.OutThrottle:0.00} VS* {Units.Vs(ap.CmdVs):+0;-0}";
-            float h = r.height / 3f;
+            // mod CPU ms per frame / frame ms; U update (R radar), G OnGUI (W web mirror), A autopilot
+            float[] m = Perf.Ms;
+            string l4 = $"MOD {Perf.ModMs:0.0}/{Perf.FrameMs:0.0}MS U{m[Perf.Update]:0.0} R{m[Perf.Radar]:0.0} G{m[Perf.Gui]:0.0} W{m[Perf.Mirror]:0.0} A{m[Perf.Autopilot]:0.0}";
+            float h = r.height / 4f;
             Text(new Rect(r.x, r.y, r.width, h), l1, 0.019f, GreenDim, TextAnchor.MiddleCenter, false);
             Text(new Rect(r.x, r.y + h, r.width, h), l2, 0.019f, GreenDim, TextAnchor.MiddleCenter, false);
             Text(new Rect(r.x, r.y + 2f * h, r.width, h), l3, 0.019f, GreenDim, TextAnchor.MiddleCenter, false);
+            Text(new Rect(r.x, r.y + 3f * h, r.width, h), l4, 0.019f, Amber, TextAnchor.MiddleCenter, false);
         }
 
         // ---- heading tape ----

@@ -6,27 +6,37 @@ push-buttons and a green-phosphor display. No Python, no virtual gamepad, no ViG
 
 **What it does**
 
-- **Autopilot:** heading, bank, barometric altitude, radar altitude (sea skimming) and vertical
-  speed modes, plus an autothrottle. Covers jets, heavy jets, helicopters and the tiltwing.
+- **Autopilot:** heading, bank, NAV, barometric altitude, terrain following (down to 2 m) and
+  vertical speed modes, plus an autothrottle. Covers jets, heavy jets, helicopters and the tiltwing.
 - **Low-level safety:** an airframe floor, terrain look-ahead along the predicted path, and a
   "Terrain, pull up" warning.
 - **Radar coverage map:** which friendly or known enemy radars would see a target at a given
   height. It can also show the masking height, i.e. how low you must fly to stay unseen.
 - **Routes:** click waypoints on the map, or let the planner find a radar-avoiding route. The
   autopilot then flies it in NAV mode.
-- **Web mirror:** both MFDs in a browser on a second computer.
+- **Web mirror:** the A/P MFD and a browser-drawn radar map on a second computer, plus a flight
+  planner that works with the game closed.
 
 ```
   A/P MFD                                         Radar MFD (F9)
-            [A/P]   [HDG]   [ATT]   [BALT]  [RALT]          [ALL]  [OWN]  [ENMY]  [TGT]  [HIDE]
-  [STEP] +--------------------------------------+ [V/S]   [FOLW] +-----------------------+
+            [A/P]   [HDG]   [ATT]   [BALT]  [TF]            [ALL]  [OWN]  [ENMY]  [TGT]  [HIDE]
+  [STEP] +--------------------------------------+ [V/S]   [FOLW] +-----------------------+ [EYES]
   [ ^ ]  |  heading tape + bug                  | [ ^ ]   [MAP]  |  game map + coverage  | [ ^ ]
   [HDG]  |  HDG SEL | ALT HLD | SPD             | [ALT]   [^RCS] |  overlay, contacts,   | [RNG]
   [ v ]  |  attitude indicator (+ FD bank cue)  | [ v ]   [RCS]  |  route                | [ v ]
-  [DATA] |  ALT  SPD  V/S  THR                  | [SYNC]  [vRCS] +-----------------------+
+  [SET]  |  ALT  SPD  V/S  THR                  | [SYNC]  [vRCS] +-----------------------+ [SAM]
          +--------------------------------------+                [WPT] [UNDO] [CLR] [RTE] [NAV]
             [A/T]   [ v ]   [SPD]   [ ^ ]   [HIDE]
 ```
+
+**SET** opens the A/P settings page:
+- Left: **SND** (terrain warning sound), **DATA** (debug line), **RESET ALL** (press twice within
+  3 s: every setting on this page back to its default), **BACK**.
+- Right: **PREV / NEXT** pick a setting from the list (TF smoothing, look-ahead, pull/push g and
+  minimum clearance, ground floor, max bank, turn rate, climb rate, A/T max throttle, terrain
+  warning time). **▲ / ▼** change it (hold or STEP for 5x steps). **DFLT** puts that one back.
+  Values changed from the default show in amber.
+- Every change is saved to the .cfg file straight away.
 
 ## Contents
 
@@ -37,6 +47,7 @@ push-buttons and a green-phosphor display. No Python, no virtual gamepad, no ViG
 - [Routes and NAV mode](#routes-and-nav-mode)
 - [Rotorcraft](#rotorcraft-chicane-ibis-tarantula)
 - [Second screen (web mirror)](#second-screen-web-mirror)
+- [Flight planner](#flight-planner)
 - [How the control laws work](#how-the-control-laws-work)
 - [Tuning](#tuning)
 - [Files and tests](#files-and-tests)
@@ -65,7 +76,7 @@ restart the game, or straight away with the BepInEx ConfigurationManager plugin 
 | **F6**          | `ShowHideMfd`          | Show / hide the A/P MFD. |
 | **F7**          | `MfdCursor`            | MFD cursor on/off, to click the push-buttons. Drag the bezel to move an MFD; drag its bottom-right corner to resize it. |
 | **F9**          | `RadarCoveragePage`    | Radar MFD: off → ALL → OWN → ENMY → off. See [Radar coverage map](#radar-coverage-map). |
-| **PgUp / PgDn** | `VerticalTargetUp` / `VerticalTargetDown` | Vertical target up/down (altitude, radar altitude or V/S, depending on mode). |
+| **PgUp / PgDn** | `VerticalTargetUp` / `VerticalTargetDown` | Vertical target up/down (altitude, TF clearance / radar altitude, or V/S, depending on mode). |
 | **] / [**       | `HeadingRight` / `HeadingLeft` | Heading bug right/left (bank target in ATT mode). |
 | **= / -**       | `SpeedUp` / `SpeedDown` | Speed target up/down. |
 | **Shift** + any rocker | `CoarseStepModifier` | 10x step. The STEP button does the same for the on-screen arrows. |
@@ -85,15 +96,28 @@ switches to the 10x step.
 ### Modes
 
 - **Lateral:**
-  - **HDG** flies to the heading bug, banking up to `MaxBank` (35°) for at most a standard-rate
-    turn.
+  - **HDG** flies to the heading bug, banking up to `MaxBank` (35°) for at most a `MaxTurnRate`
+    turn (standard rate, 3°/s).
   - **ATT** holds a bank angle; below 7° of bank it snaps to wings-level.
   - **NAV** flies a route (see [Routes and NAV mode](#routes-and-nav-mode)).
 - **Vertical:**
-  - **BALT** holds barometric altitude.
-  - **RALT** holds radar altitude, for low-level and sea-skimming flight.
+  - **BALT** holds barometric altitude, down to 2 m for sea skimming: below one ALT step the
+    rocker moves in TF-sized steps (1 m / 5 ft).
+  - **TF** (terrain following) holds a clearance above the ground or sea with a forward look,
+    also down to 2 m. See [Low level and terrain safety](#low-level-and-terrain-safety).
+    Rotorcraft have no TF: their button reads **RALT** and holds radar altitude.
   - **V/S** holds a vertical speed.
-  - Altitude and radar-altitude targets can't be set below 1 m.
+- **One lift vector.** On jets in HDG and NAV, the climb or descent the vertical mode wants and the
+  turn the lateral mode wants are combined into one direction for the lift. The A/P banks to point
+  the lift that way and pulls as hard as that needs.
+  - **Push-over in a turn:** when terrain drops away mid-turn, the jet keeps its turn's bank and
+    keeps pulling round instead of unloading.
+  - **Never steeper than a level turn:** a small steering correction over a crest stays a small
+    bank, and straight flight is wings level.
+- **Climbing comes first, turning gets the rest.** On jets, the A/P uses up to 80% of the g that
+  full stick gives the airframe at its current speed. The lift the climb or descent needs is taken
+  first, and the turn gets the rest. Terrain that needs a pull-up takes lift from the turn, so the
+  jet rolls back toward wings level. `MaxBank` still caps the bank.
 - **A/T** is independent of the A/P, as in real jets. It holds speed with the throttle.
 - **Re-syncing.** Pressing an already-selected mode, or the target readout beside a rocker,
   re-syncs that target to the current value. **SYNC** re-syncs everything.
@@ -133,7 +157,7 @@ weapon-safety option on, or a left click on a button could also fire the gun.
 **Floor and bank limit.** These work in every vertical mode.
 - **Height source.** The mod runs its own radar altimeter every physics tick. The game's own
   value updates only every 0.1 s, and over shallow water it measures to the seabed.
-- **What RALT holds.** RALT holds the same reference as the HUD's `R` (the bottom of the gear).
+- **What TF (and RALT) hold.** The same reference as the HUD's `R` (the bottom of the gear).
 - **Floor.** The A/P keeps the lowest point of the airframe (wingtips, nose, tail, gear) at
   least `GroundFloorMeters` (1.5 m) above the surface.
 - **Sink limit.** Close to the floor, the allowed sink rate shrinks with clearance
@@ -141,7 +165,8 @@ weapon-safety option on, or a left click on a button could also fire the gun.
   stop at the floor. This is the barrier-function idea used in automatic ground-collision
   avoidance [[9]](#ref-gcas), [[10]](#ref-vista).
 - **Bank limit.** Near the surface, bank is limited so the low wingtip can't dip in. The MFD
-  shows `BANK LIM - LOW` while this is active.
+  shows `BANK LIM - LOW` while this is active. The jet then turns as hard as that bank allows,
+  more slowly, and stays down.
 
 **Terrain look-ahead** (`TerrainLookahead`, on by default).
 - **What it samples.** Every physics tick, 12 rays sample terrain, ship decks and the sea along
@@ -150,7 +175,40 @@ weapon-safety option on, or a left click on a button could also fire the gun.
   a 1 s reaction and a `FloorPullUpG` pull-up, and never climbs steeper than
   `MaxFlightPathAngle`.
 - **On the MFD.** `TERRAIN AHEAD - CLIMB` shows while the look-ahead is driving the climb.
-- **All modes.** It works in every vertical mode, so BALT over mountains climbs too.
+- **All modes.** It works in every vertical mode, so BALT over mountains climbs too. TF has its
+  own, finer scan (below).
+
+**Terrain following (TF).** Jets only. Press **TF** (the MFD shows `TERR FLW`). The vertical
+rocker sets the clearance to hold, never less than `MinClearanceMeters` (2 m). TF can dip several
+metres below the target over sharp crests, more the faster you fly, so a very low target over land
+is a real risk; over flat sea it is fine.
+- **What it does.** It holds the set clearance above the surface, but scans the terrain, ships and sea
+  along the track it is about to fly, including the turn HDG or ATT is making, across a corridor
+  wider than the wingspan. It starts each climb early enough to cross the high ground at the set
+  clearance and level, so it doesn't balloon over the crest, then follows the far side back down.
+- **In turns.** TF takes bank away when terrain needs a pull-up, as described above.
+  - **Early climbs when banked:** rolling back toward level takes time, so in a steep bank TF
+    allows for that time and starts its climbs earlier.
+  - **Turn prediction:** it predicts the turn at the rate the current bank limit allows, not the
+    rate HDG asks for.
+- **Ride.** `PullUpG` (3.0) and `PushOverG` (3.0) in `[TerrainFollowing]` are the g limits, as
+  extra g above and below 1 g: by default it pulls up to 4 g and pushes down to -2 g on the G
+  meter. They are separate from `MaxPullG`/`MaxPushG`, which limit the other modes. TF never
+  uses more than 80% of the pitch rate the airframe's fly-by-wire gives at the current speed,
+  so slow or heavy jets fly a softer ride than the setting. It plans the ride with 60% of the
+  limits and keeps the rest to catch up. Higher values hug the ground closer. The faster you
+  fly and the softer the ride, the more it rides high over short, sharp hills: the jet can't
+  turn its flight path that fast.
+- **Limits.** Climbs and descents go up to `MaxFlightPathAngle` (20°), not `MaxClimbRate`. Use the
+  A/T: nothing else holds your speed in a long climb. If terrain ahead is too steep to clear at
+  that angle, the MFD shows `TF CLIMB LIM` in amber. Take the jet and turn away. The terrain
+  warning below still works in TF.
+- **How far it looks.** `LookAheadSeconds` (15 s of flight, 1 to 8 km).
+- **What it can miss.** The scan is 40 distances ahead, three points across the corridor at each,
+  refreshed ten times a second, not a solid picture.
+  A thin mast between points, or anything that isn't terrain, a building or a ship, isn't seen.
+  Aircraft and missiles aren't either.
+- **Cost.** About 1200 downward raycasts a second, and only while TF is flying the jet.
 
 **Terrain warning ("Terrain, pull up").** This is on whether or not the A/P is engaged.
 - **How it decides.** Each physics tick it looks along your velocity vector for terrain, ships
@@ -197,6 +255,22 @@ F9 opens a radar MFD over the game's map. The top row picks the view.
 
 **Jamming.** A jammed radar adds no coverage, and its site turns amber.
 
+**EYES** (R1) adds visual spotting: cyan (friendly) / orange (enemy) where a unit would see your
+jet by eye (its visual range, your jet's visibility × its magnification, line of sight; enemy
+eyes are skipped while you fly faster than they can track).
+
+**SAM** (R5) rings anti-air units at their longest engagement range (ALL: yours, to see the gaps
+in your air defence; ENMY: theirs). Solid = missiles, faint = guns; a battery's overlapping rings
+are drawn as one.
+
+**RWR** (ENMY, yellow) marks where an enemy radar paints you without detecting you: the game
+fires your radar warning and map ping on every radar check that reaches you (out to 2× its range,
+in line of sight), even when the signal is too weak to detect you.
+
+**Terrain shading.** Under the coverage the terrain is shaded (lit from the north-west) with
+contour lines every 100 m (bolder every 500 m). Zoomed in, a finer height map of the view is
+raycast in about a second, with 50 m contours.
+
 **TGT MASK** draws the **masking height**: the lowest height above ground the radars can see at
 each spot.
 - **In ENMY:** fly below it to stay hidden. Red means seen even at 5 m; green means hidden up to
@@ -206,7 +280,9 @@ each spot.
   conservative for hiding.
 
 **How it's computed.**
-- The map's terrain is raycast once into a height grid.
+- The map's terrain is raycast once into a height grid and saved to
+  `BepInEx\FlightPlanner\terrain\<map>.bin`, so later flights on that map load it instead
+  (until a game update; delete the file to force a new mapping).
 - Each radar is swept radially (bearings × range bins), keeping the steepest terrain slope seen
   from the radar. This is the standard radial-sweep viewshed [[14]](#ref-viewshed).
 - Each sweep is then reduced to a masking height per bin, combining the terrain and the radar
@@ -214,6 +290,10 @@ each spot.
   provide [[15]](#ref-luciad).
 - With masking heights, any target height is a single comparison per bin. The self-check confirms
   that this gives exactly the same result as the earlier per-height sweep.
+- **Off the game's thread.** Sweeps, line-of-sight tables, the overlay's pixels and the web map's
+  copy are all worked out on background threads at below-normal priority (at most a quarter of
+  your cores), so filling the map doesn't cost frame rate; the game only uploads the finished
+  picture. See `PERFORMANCE.md`.
 
 ## Routes and NAV mode
 
@@ -227,7 +307,18 @@ The radar MFD's bottom row plans and flies routes.
 | **RTE** | Plan a radar-avoiding route from your position to the destination. |
 | **NAV** | Fly the route with the A/P. HDG or a heading rocker leaves NAV. |
 
-- **Hand-placed waypoints** are flown leg by leg. Your vertical mode is left alone.
+- **Hand-placed waypoints** are flown leg by leg. Your vertical mode is left alone unless a
+  waypoint has a height (below).
+- **Editing on the web map** (or loading a plan from the [flight planner](#flight-planner)):
+  right-click adds a waypoint (on the route line: inserts one; on a waypoint: deletes it), drag
+  moves one, mouse wheel over one sets its leg's **height** and Shift+wheel its **speed**; or type
+  them into the route list. A hand-edited planned route is no longer re-planned.
+- **Leg height and speed.** A waypoint's height becomes the TF target for the leg flying *to* it
+  (`TF RTE` on the MFD); its speed becomes the A/T target as that leg starts (engage the A/T to fly
+  it). The rockers override them until the next leg.
+- **ETA.** With the A/P on, the MFD's message line shows `ETA TGT h:mm:ss` to the first selected
+  target (in NAV: along the route to its point nearest the target, then straight there), or with no
+  target in NAV, `ETA WPT` to the route's last waypoint, at the current ground speed.
 - **What RTE plans with.** It uses the enemy radars your side knows about, at their known
   positions, and your own RCS (or `RadarEnemyRcs`).
 - **How it searches.** It runs Lazy Theta* [[11]](#ref-lazytheta), an any-angle grid search
@@ -238,7 +329,7 @@ The radar MFD's bottom row plans and flies routes.
 - **The result.** The route goes around radars, or drops into terrain masking where that is
   shorter, and stays higher where it can. This follows recent detection-risk route planners
   [[13]](#ref-riska).
-- **Planned legs carry a height.** NAV sets RALT and follows the heights leg by leg (`RALT RTE`
+- **Planned legs carry a height.** NAV selects TF and follows the heights leg by leg (`TF RTE`
   on the MFD). It descends early for a lower leg and climbs after the waypoint. Touching the
   vertical rockers or selecting a vertical mode hands the height back to you.
 - **Re-planning.** A planned route is re-planned from your position when the known enemy radar
@@ -246,8 +337,9 @@ The radar MFD's bottom row plans and flies routes.
   happens at most every 10 s.
 - **Path following.** NAV uses L1 guidance [[6]](#ref-l1). The L1 distance is kept to at least
   0.6 × the turn radius at `MaxBank`, so a fast jet's wide turns can't make it circle. It turns
-  onto the next leg one turn-lead before each waypoint, so turns roll out on the new leg. The A/P
-  MFD shows the waypoint number and the distance to go.
+  onto the next leg one turn-lead before each waypoint, so turns roll out on the new leg. Its
+  turn is flown as a turn rate through the same lift vector as HDG, so TF's climbs still come
+  first. The A/P MFD shows the waypoint number and the distance to go.
 - **Background work.** The planner runs on a worker thread. While a planned route is active, the
   radar page keeps mapping terrain and sweeping enemy radars, even when the page is hidden.
 - **Not on rotorcraft.** NAV is for fixed-wing aircraft only.
@@ -275,7 +367,7 @@ game's rate-command helicopter fly-by-wire, and also moves the collective and th
     hover hold).
   - Above ~25 m/s, it makes coordinated banked turns (bank ≤ 30°), with the pedals keeping the
     ball centred.
-- **Height.** BALT, RALT and V/S work as on jets, with two limits:
+- **Height.** BALT, RALT (on the TF button) and V/S work as on jets, with two limits:
   - climb and descent are limited to 8 m/s in helicopter mode;
   - sink is limited to 3 m/s at low speed, to stay out of vortex ring state.
 - **Near the ground.**
@@ -318,29 +410,81 @@ repeat, so each tap is one step (use STEP for 10x steps).
 - If the picture is upside down, set `FlipVertical = true`.
 - Anyone on your network who opens the page can press the MFD buttons.
 
-**Beside the MFDs:**
-- **EXPAND MAP** fills the window with the radar MFD; **RESTORE** or Esc goes back.
-- **Target filters** are the game's own target-list filters. Tap one to toggle it; right-click
-  or long-press to show only that one. **RESET FILTERS** and **CLEAR SELECTION** do what the
-  in-game buttons do.
-- **Selected** lists your targets; tap one to drop it.
-- **Available** lists the enemies the map shows, nearest first. Tap one to add or remove it.
+**The radar map** fills the browser window without its bezel. The browser draws it from data the
+game sends (coverage, contacts, route), so it is sharp at any window size and pans and zooms
+instantly. The map image and terrain shading come from the flight planner's map file, so the map
+picture appears once the game has mapped that map's terrain. Drag to pan, scroll to zoom, click an
+enemy to select it, and edit the route as in [Routes and NAV mode](#routes-and-nav-mode). Two
+floating windows sit on top; drag them by their title bar, **_** minimises one.
 
-**Mirror settings** (`[WebMirror]`):
-- `Resolution`: A/P MFD, 1024 by default.
-- `MapResolution`: radar MFD, 1440 by default. Both resolutions are capped at the game window's
-  height.
-- `FramesPerSecond`: 30 by default, up to 60.
-- `JpegQuality`.
+- **A/P**: the autopilot MFD, clickable as in-game. **-** / **+** resize it. Minimising it stops
+  the game rendering it.
+- **MAP / ROUTE / TARGETS**: everything the map's bezel buttons do (views, target height, EYES,
+  SAM, follow jet, whole map, zoom, target RCS typed or **OWN**), then:
+  - **Route**: **NAV**, **UNDO**, **CLEAR ROUTE**, **PLAN RTE**, **FLIGHT PLANNER**, the A/P's ETA
+    and the planner's state, then each waypoint still ahead with its distance, its leg height and
+    speed (type a new one and press Enter; empty = none) and **✕** to delete it.
+  - **Target filters**: the game's own target-list filters. Tap one to toggle it; right-click
+    or long-press to show only that one. **RESET FILTERS** and **CLEAR SELECTION** do what the
+    in-game buttons do.
+  - **Selected** lists your targets; tap one to drop it.
+  - **Available** lists the enemies the map shows, nearest first. Tap one to add or remove it.
 
-Frames are streamed as MJPEG and encoded off the main thread.
+**Mirror settings** (`[WebMirror]`): `Resolution` (A/P MFD, default 1024; capped at the game
+window's height), `FramesPerSecond` (default 30, up to 60) and `JpegQuality`. The A/P MFD is
+streamed as JPEG frames (MJPEG), encoded off the main thread. `MapAsVideo = true` streams the map
+the same way instead of drawing it in the browser (much more CPU); `MapResolution` (default 2560)
+is then its long side.
+
+The web server also runs in the game's menus (the MFD images only stream while you fly), so the
+flight planner can send a plan to the autopilot before you spawn.
+
+## Flight planner
+
+The flight planner is a map editor for NAV routes. It works with the game closed.
+- **Opening it:** double-click `BepInEx\FlightPlanner\planner.html`. With the web mirror on and
+  the game running, it's also at `http://<pc>:8080/planner/` (or **FLIGHT PLANNER** on the web
+  page).
+- **Maps:** each map appears after one flight on it with the mod. The mod maps the terrain in the
+  background, then saves the map image and terrain shading to `FlightPlanner\maps\<map>.js`.
+- **Airframes:** each jet's fly-by-wire numbers (g limit, corner speed, roll rate) are saved
+  after one flight in it. A generic 9 g fighter is always there.
+
+**Editing a plan**
+- **Waypoints:** click to add one at the end. Click the route line to insert one, drag a
+  waypoint to move it, and right-click one to delete it.
+- **Height:** mouse wheel over a waypoint. **Speed:** Shift+wheel over it. Or type either into
+  the waypoint table; an empty speed means "keep the current speed".
+- **Undo:** **UNDO** or Ctrl+Z.
+- **Map:** elsewhere, drag to pan and wheel to zoom. **FIT** shows the whole route.
+
+**Predicted path.** The cyan line is where the chosen jet should fly the route, with a tick
+every minute.
+- **How it's worked out:** it starts at waypoint 1 heading for waypoint 2, at the start speed,
+  and uses the autopilot's own NAV maths: L1 guidance with `L1Period`/`L1Damping`, the turn lead
+  at `MaxBank`, the 80% g budget at each leg's speed, and `MaxTurnRate`.
+- **The table:** for each waypoint it shows the time it's reached and **MISS**, how close the
+  path passes it. Amber means more than 1 km off. NAV cuts corners by about a turn radius, so
+  slow down for that leg, or round the corner with more waypoints.
+- **What it can't predict:** it is flat (no terrain or climbs), and it treats speed changes as
+  8 m/s² either way, whatever the jet.
+
+**Keeping plans**
+- **SAVE** keeps a plan in this browser. A page opened from disk and the page served by the game
+  are separate browser storage.
+- **EXPORT FILE** / **IMPORT FILE** move plans as `.json` files between the two pages, computers
+  or players.
+- **On the page served by the game:**
+  - **SEND TO JET** loads the plan into the autopilot, in flight or from the menus. Then press
+    **NAV** in the jet: it flies each leg at its height in TF, and at its speed with the A/T on.
+  - **LOAD FROM JET** takes the autopilot's current route into the editor.
 
 ## How the control laws work
 
 ```
 vertical: alt err -> climb rate -> flight-path angle (gamma) -> pitch rate -> stick
 lateral:  hdg err -> turn rate  -> bank angle                -> roll rate  -> stick
-          (NAV: L1 lateral acceleration -> bank angle)
+          (NAV: L1 lateral acceleration / speed -> turn rate)
 speed:    speed err (+ energy coupling with the A/P) -> throttle
 ```
 
@@ -391,9 +535,9 @@ three.
 
 ## Tuning
 
-Every gain is in the config file. Turn on **DATA** (L5) to see commanded vs actual bank,
-flight-path angle, pitch and roll rate, the raw stick outputs, the rate-loop law and the learned
-effectiveness.
+Every gain is in the config file. Turn on **DATA** (on the **SET** page) to see commanded vs
+actual bank, flight-path angle, pitch and roll rate, the raw stick outputs, the rate-loop law and
+the learned effectiveness. Most low-level settings can also be changed in flight on the **SET** page.
 
 | Symptom | Try |
 |---------|-----|
@@ -406,6 +550,9 @@ effectiveness.
 | Nose buzzes (Classic) | Lower `PitchRateGain` |
 | Wings rock in HDG/ATT (Classic) | Lower `BankGain`, then `RollRateGain` |
 | Settles a bit off bank target (Classic) | Raise `RollRateIntegral` |
+| TF rides too high over hills | Raise `TerrainFollowing.PullUpG` / `PushOverG`, or fly slower |
+| TF ride too violent | Lower `TerrainFollowing.PullUpG` / `PushOverG` |
+| TF keeps making sharp corrections | Raise `TerrainFollowing.Smoothing` (0.4 s; 0 = off) |
 | Speed hunts with A/T | Raise `SpeedDamping`, or lower `SpeedGain` |
 | A/T lights the afterburner | Lower `MaxThrottle` |
 | Speed sags in climbs or turns with A/P + A/T | Raise `ClimbFeedforward` / `TurnFeedforward` |
@@ -424,17 +571,21 @@ game yet.
 |------|----------|
 | `src/AutopilotPlugin.cs` | Plugin entry point, aircraft binding, hotkeys, commands |
 | `src/Patches.cs` | Harmony hooks into the pilot input path |
-| `src/FlightController.cs` | State sampling and the fixed-wing control laws |
+| `src/FlightController.cs` | State sampling and the fixed-wing control laws, NAV |
+| `src/TerrainFollowing.cs` | The TF mode's look-ahead terrain scan |
 | `src/RotorcraftLaws.cs` | Control laws for the helicopters and the tiltwing |
 | `src/ApMath.cs` | Pure arithmetic of the control laws (floor, look-ahead, energy coupling, ...) |
 | `src/RateLoop.cs` | RLS effectiveness estimator and the INDI rate loop |
 | `src/NavGuidance.cs` | Route model and L1 path following |
 | `src/RoutePlanner.cs` | Lazy Theta* radar-avoiding route planner |
 | `src/CoverageMath.cs` | Masking heights and detection range |
-| `src/RadarCoveragePage.cs` | Radar MFD: coverage, MASK view, route editing and planning |
-| `src/TerrainHeightGrid.cs` | One-time terrain height map for the radar page |
+| `src/RadarCoveragePage.cs` | Radar MFD: coverage, MASK view, EYES/SAM, route editing and planning; its data for the web map |
+| `src/TerrainHeightGrid.cs` | Terrain height map for the radar page (cached on disk per map) |
+| `src/FlightPlanner.cs`, `src/planner.html` | The flight planner (map/airframe export, and the editor app) |
+| `src/GunHeatPage.cs` | Small gun-heat display, shown only in aircraft whose gun can overheat |
+| `src/Perf.cs` | Where the mod spends its time (DATA page and log) |
 | `src/TerrainWarning.cs` | The "Terrain, pull up" warning |
-| `src/MfdFrame.cs`, `src/MfdPage.cs` | MFD bezel and drawing; the A/P page |
+| `src/MfdFrame.cs`, `src/MfdPage.cs` | MFD bezel and drawing; the A/P page and its SET page |
 | `src/WebMirror.cs`, `src/TargetPanel.cs` | Web mirror; its target filters and lists |
 | `src/ApSettings.cs` | Config entries |
 | `src/SoundBank.cs`, `src/DisconnectTone.cs`, `src/Units.cs`, `src/ApCommand.cs` | Helpers |
@@ -445,12 +596,19 @@ includes offline models of:
 - INDI + RLS on a rate-command airframe (response times of 0.1–0.6 s, delays of 0–60 ms,
   effectiveness errors of 0.5–2x);
 - a terrain look-ahead ridge crossing;
+- terrain following over ridges, a cliff, rolling hills and isolated hills;
+- route hand edits (never into flown legs);
 - L1 intercepts and reversals;
 - route planning around a radar and through a masking valley;
 - masking heights against the original line-of-sight sweep.
 
+`node tests/planner-sim.js` checks the flight planner's predicted path (a JavaScript copy of NAV)
+against fly-by turn geometry.
+
 These are simplified models, not the game's flight model, so real airframes still need the
 [Tuning](#tuning) table.
+
+`PERFORMANCE.md` records where the mod spends frame time and every optimisation made so far.
 
 ## References
 
