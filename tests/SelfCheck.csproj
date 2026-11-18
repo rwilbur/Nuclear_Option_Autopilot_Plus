@@ -11,6 +11,9 @@
   <ItemGroup>
     <Compile Include="SelfCheck.cs" />
     <Compile Include="..\src\ApMath.cs" />
+    <Compile Include="..\src\RateLoop.cs" />
+    <Compile Include="..\src\NavGuidance.cs" />
+    <Compile Include="..\src\RoutePlanner.cs" />
   </ItemGroup>
 
 </Project>
