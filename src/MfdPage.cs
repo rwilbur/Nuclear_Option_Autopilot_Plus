@@ -117,6 +117,14 @@ namespace AutopilotMod
             {
                 Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), $"ROTOR RPM LIM {ap.RotorNr * 100f:0}%", 0.028f, Amber, TextAnchor.MiddleCenter);
             }
+            else if (apOn && ap.TerrainAhead)
+            {
+                Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), "TERRAIN AHEAD - CLIMB", 0.028f, Amber, TextAnchor.MiddleCenter);
+            }
+            else if (apOn && ap.SpeedProtectActive)
+            {
+                Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), "SPD PROT - CLIMB LIMITED", 0.028f, Amber, TextAnchor.MiddleCenter);
+            }
             else if (apOn && ap.BankLimitedBySurface)
             {
                 Text(Sc(0.215f, 0.255f, 0.57f, 0.045f), "BANK LIM - LOW", 0.028f, Amber, TextAnchor.MiddleCenter);
@@ -184,7 +192,12 @@ namespace AutopilotMod
             {
                 case ApCommand.LatSync:
                     active = ap.ApEngaged;
-                    if (ap.Lateral == LateralMode.Hdg)
+                    if (ap.Lateral == LateralMode.Nav && ap.Nav.Has)
+                    {
+                        tag = $"WPT {ap.Nav.Active + 1}/{ap.Nav.Points.Count}";
+                        value = $"{ap.NavToGo / (Units.Metric ? 1000f : 1852f):0.0}{(Units.Metric ? "KM" : "NM")}";
+                    }
+                    else if (ap.Lateral == LateralMode.Hdg || ap.Lateral == LateralMode.Nav)
                     {
                         tag = "HDG";
                         value = $"{Mathf.Repeat(Mathf.Round(ap.TgtHeading), 360f):000}°";
@@ -201,7 +214,7 @@ namespace AutopilotMod
                     switch (ap.Vertical)
                     {
                         case VerticalMode.Balt: tag = "ALT " + Units.AltUnit; value = $"{Units.Alt(ap.TgtAltitude):F0}"; break;
-                        case VerticalMode.Ralt: tag = "RALT " + Units.AltUnit; value = $"{Units.Alt(ap.TgtRadarAlt):F0}"; break;
+                        case VerticalMode.Ralt: tag = (ap.RouteVertical ? "RTE " : "RALT ") + Units.AltUnit; value = $"{Units.Alt(ap.TgtRadarAlt):F0}"; break;
                         default: tag = "V/S " + Units.VsUnit; value = $"{Units.Vs(ap.TgtVs):+0;-0;0}"; break;
                     }
                     break;
@@ -221,8 +234,8 @@ namespace AutopilotMod
         private void DrawAnnunciators(Rect r, bool apOn)
         {
             float w = r.width / 3f;
-            string lat = ap.Lateral == LateralMode.Hdg ? "HDG SEL" : "ATT HLD";
-            string vert = ap.Vertical == VerticalMode.Balt ? "ALT HLD" : ap.Vertical == VerticalMode.Ralt ? "RALT HLD" : "V/S";
+            string lat = ap.Lateral == LateralMode.Hdg ? "HDG SEL" : ap.Lateral == LateralMode.Nav ? "NAV" : "ATT HLD";
+            string vert = ap.Vertical == VerticalMode.Balt ? "ALT HLD" : ap.Vertical == VerticalMode.Ralt ? (ap.RouteVertical ? "RALT RTE" : "RALT HLD") : "V/S";
             Annunciator(new Rect(r.x, r.y, w, r.height), lat, apOn);
             Annunciator(new Rect(r.x + w, r.y, w, r.height), vert, apOn);
             Annunciator(new Rect(r.x + 2f * w, r.y, w, r.height), ap.Rotorcraft && ap.TgtSpeed == 0f ? "HVR HLD" : "SPD", ap.AtEngaged);
@@ -246,7 +259,9 @@ namespace AutopilotMod
         {
             string fbw = !ap.Rotorcraft ? (ap.HasFbw ? "FBW" : "MAN") : float.IsNaN(ap.NacelleDeg) ? "HELO" : $"NAC{ap.NacelleDeg:0}";
             string l1 = $"BNK {ap.CmdBankDeg:+0.0;-0.0}/{s.Bank:+0.0;-0.0} {(ap.Rotorcraft ? "PIT" : "FPA")} {ap.CmdGammaDeg:+0.0;-0.0}/{(ap.Rotorcraft ? s.Pitch : s.Gamma):+0.0;-0.0}";
-            string l2 = $"Q {ap.CmdQ * Mathf.Rad2Deg:+0.0;-0.0}/{s.PitchRate * Mathf.Rad2Deg:+0.0;-0.0} P {ap.CmdP * Mathf.Rad2Deg:+0;-0}/{s.RollRate * Mathf.Rad2Deg:+0;-0} {fbw}";
+            string law = ap.Rotorcraft ? "" : cfg.RateLoopLaw.Value == RateLaw.Indi ? " INDI" : " PI";
+            string learned = ap.Rotorcraft || !cfg.AdaptiveEffectiveness.Value ? "" : $" x{ap.PitchAxis.Rls.Ratio:0.00}/{ap.RollAxis.Rls.Ratio:0.00}";
+            string l2 = $"Q {ap.CmdQ * Mathf.Rad2Deg:+0.0;-0.0}/{s.PitchRate * Mathf.Rad2Deg:+0.0;-0.0} P {ap.CmdP * Mathf.Rad2Deg:+0;-0}/{s.RollRate * Mathf.Rad2Deg:+0;-0} {fbw}{law}{learned}";
             string l3 = $"STK P{ap.OutPitch:+0.00;-0.00} R{ap.OutRoll:+0.00;-0.00} T{ap.OutThrottle:0.00} VS* {Units.Vs(ap.CmdVs):+0;-0}";
             float h = r.height / 3f;
             Text(new Rect(r.x, r.y, r.width, h), l1, 0.019f, GreenDim, TextAnchor.MiddleCenter, false);
@@ -281,8 +296,8 @@ namespace AutopilotMod
                 }
             }
 
-            // heading bug (HDG mode)
-            if (ap.Lateral == LateralMode.Hdg)
+            // heading bug (HDG mode; NAV: the leg's course)
+            if (ap.Lateral == LateralMode.Hdg || (ap.Lateral == LateralMode.Nav && ap.Nav.Has))
             {
                 float bx = Mathf.Clamp(w * 0.5f + Mathf.DeltaAngle(s.Heading, ap.TgtHeading) * ppd, 3f, w - 3f);
                 float bw = 0.022f * S, bh = h * 0.3f;

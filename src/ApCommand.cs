@@ -38,5 +38,12 @@ namespace AutopilotMod
         RdrRcsUp,
         RdrRcsDown,
         RdrRcsOwn,
+
+        // navigation / routing (radar page bottom row)
+        RteWpt,
+        RteUndo,
+        RteClear,
+        RtePlan,
+        NavToggle,
     }
 }

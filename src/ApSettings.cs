@@ -8,6 +8,8 @@ namespace AutopilotMod
     /// Edit the .cfg while the game is closed (or use a BepInEx config manager in-game);
     /// values are read live every physics tick, so in-game edits apply immediately.
     /// </summary>
+    internal enum RateLaw { Indi, Classic }
+
     internal sealed class ApSettings
     {
         // ---- keys ----
@@ -38,6 +40,17 @@ namespace AutopilotMod
         public ConfigEntry<float> PitchRateIntegralFbw;
         public ConfigEntry<float> PitchRateIntegralNoFbw;
         public ConfigEntry<float> GroundFloor;
+        public ConfigEntry<bool> TerrainLookahead;
+        public ConfigEntry<float> LookaheadSeconds;
+        public ConfigEntry<float> FloorPullG;
+
+        // ---- rate loops ----
+        public ConfigEntry<RateLaw> RateLoopLaw;
+        public ConfigEntry<bool> AdaptiveEffectiveness;
+        public ConfigEntry<float> IndiPitchBandwidth;
+        public ConfigEntry<float> IndiRollBandwidth;
+        public ConfigEntry<float> IndiIncrementGain;
+        public ConfigEntry<float> IndiFilterHz;
 
         // ---- lateral ----
         public ConfigEntry<float> HeadingGain;
@@ -54,6 +67,18 @@ namespace AutopilotMod
         public ConfigEntry<float> SpeedDamping;
         public ConfigEntry<float> AtMinThrottle;
         public ConfigEntry<float> AtMaxThrottle;
+        public ConfigEntry<bool> EnergyCoupling;
+        public ConfigEntry<float> ClimbFeedforward;
+        public ConfigEntry<float> TurnFeedforward;
+        public ConfigEntry<bool> SpeedProtection;
+
+        // ---- navigation / routing ----
+        public ConfigEntry<float> L1Period;
+        public ConfigEntry<float> L1Damping;
+        public ConfigEntry<string> RouteHeights;
+        public ConfigEntry<float> RouteExposureWeight;
+        public ConfigEntry<float> RouteLowPenalty;
+        public ConfigEntry<bool> RouteAutoReplan;
 
         // ---- safety ----
         public ConfigEntry<float> StickOverride;
@@ -121,6 +146,17 @@ namespace AutopilotMod
             PitchRateIntegralNoFbw = cfg.Bind(V, "PitchRateIntegralNoFbw", 1.5f, "Pitch-rate integral gain on aircraft WITHOUT fly-by-wire (this is what trims out the 1g stick force).");
             GroundFloor = cfg.Bind(V, "GroundFloorMeters", 1.5f, "Minimum clearance between the airframe's LOWEST point (wingtips, nose, tail, gear) and the water/ground. In every A/P mode the sink rate is limited near it, and bank is limited so a wingtip can't dip below it.");
             FloorGain = cfg.Bind(V, "FloorGain", 1.0f, "How hard the floor pushes back: allowed sink rate (m/s) per metre of clearance above the floor. Below the floor it commands a climb at the same rate.");
+            FloorPullG = cfg.Bind(V, "FloorPullUpG", 1.0f, "Extra g the floor and terrain look-ahead PLAN a pull-up with. Further from the floor the sink rate is limited to what this pull-up can still stop, and terrain ahead is climbed over early enough for it. Keep it below what the jet can pull (and below MaxPullG) for margin.");
+            TerrainLookahead = cfg.Bind(V, "TerrainLookahead", true, "Look ahead along the predicted flight path (including the current turn) for terrain, ships and the sea, and start climbing early enough to clear it with the FloorPullUpG pull-up. Without it the floor only knows the surface straight below.");
+            LookaheadSeconds = cfg.Bind(V, "LookaheadSeconds", 15f, new ConfigDescription("How far ahead (s of flight) the terrain look-ahead checks.", new AcceptableValueRange<float>(3f, 40f)));
+
+            const string R = "Tuning.RateLoops";
+            RateLoopLaw = cfg.Bind(R, "Law", RateLaw.Indi, "Innermost pitch/roll rate loops. Indi = incremental nonlinear dynamic inversion: moves the stick by the increment that produces the missing rate acceleration, using the measured response, so trim and model errors need no integrator. Classic = feedforward + PI (the previous law). Switch back to Classic if a jet's nose or wings buzz on Indi.");
+            AdaptiveEffectiveness = cfg.Bind(R, "AdaptiveEffectiveness", true, "Learn, in flight, how much pitch/roll rate the stick actually gives (recursive least squares on your own and the autopilot's stick inputs) and correct the fly-by-wire model with it. Used by both laws.");
+            IndiPitchBandwidth = cfg.Bind(R, "IndiPitchBandwidth", 3f, "Indi: pitch-rate error (rad/s) -> pitch acceleration (rad/s^2). Higher = tighter pitch-rate tracking.");
+            IndiRollBandwidth = cfg.Bind(R, "IndiRollBandwidth", 4f, "Indi: roll-rate error -> roll acceleration (1/s).");
+            IndiIncrementGain = cfg.Bind(R, "IndiIncrementGain", 0.5f, new ConfigDescription("Indi: share of the computed stick increment applied each physics tick. 1 = textbook INDI; 0.5 kept overshoot under 2% in the self-check model even with a 60 ms airframe delay and a 2x effectiveness error.", new AcceptableValueRange<float>(0.1f, 1f)));
+            IndiFilterHz = cfg.Bind(R, "IndiFilterHz", 5f, new ConfigDescription("Indi: low-pass (Hz) on the measured rate acceleration and, to match its lag, on the applied stick.", new AcceptableValueRange<float>(1f, 20f)));
 
             const string L = "Tuning.Lateral";
             HeadingGain = cfg.Bind(L, "HeadingGain", 0.35f, "Heading error (deg) -> commanded turn rate (deg/s).");
@@ -137,6 +173,18 @@ namespace AutopilotMod
             SpeedDamping = cfg.Bind(T, "SpeedDamping", 0.06f, "Throttle per m/s^2 of acceleration (damps hunting).");
             AtMinThrottle = cfg.Bind(T, "MinThrottle", 0.05f, "Lowest throttle the autothrottle will set.");
             AtMaxThrottle = cfg.Bind(T, "MaxThrottle", 1.0f, "Highest throttle the autothrottle will set. Lower it to keep the A/T out of afterburner.");
+            EnergyCoupling = cfg.Bind(T, "EnergyCoupling", true, "With the A/P and A/T both engaged, the A/T works on total energy (TECS-style): it adds throttle as the A/P commands a climb or a banked turn, instead of waiting for the speed to bleed off.");
+            ClimbFeedforward = cfg.Bind(T, "ClimbFeedforward", 1.0f, "Energy coupling: throttle per unit of sin(commanded flight-path angle). 1.0 = +0.17 throttle for a 10 deg climb. Raise for draggy/underpowered jets, lower if speed rises in climbs.");
+            TurnFeedforward = cfg.Bind(T, "TurnFeedforward", 0.3f, "Energy coupling: throttle per unit of (load factor^2 - 1) in a level turn (induced drag). 0.3 = +0.15 at 35 deg of bank.");
+            SpeedProtection = cfg.Bind(T, "SpeedProtection", true, "With the A/P and A/T both engaged: when the A/T is already at MaxThrottle and the speed still falls well below target, the climb is limited (or a descent flown) so the jet regains speed instead of decaying toward a stall. The terrain floor always wins.");
+
+            const string N = "Navigation";
+            L1Period = cfg.Bind(N, "L1Period", 20f, "NAV mode: L1 path-following period (s). Lower = tighter track-keeping, higher = gentler. Never tighter than the turn radius at MaxBank allows.");
+            L1Damping = cfg.Bind(N, "L1Damping", 0.75f, "NAV mode: L1 damping ratio.");
+            RouteHeights = cfg.Bind(N, "RouteHeightBands", "30,150,500", "Heights above ground (m) the route planner may fly legs at, comma-separated, lowest first. Legs are flown with RALT at these heights.");
+            RouteExposureWeight = cfg.Bind(N, "RouteExposureWeight", 30f, "Route planner: one second seen by an enemy radar costs as much as this many seconds of extra flying. Higher = longer detours to stay hidden.");
+            RouteLowPenalty = cfg.Bind(N, "RouteLowFlightPenalty", 0.15f, "Route planner: extra cost per height band below the highest, as a fraction of flight time, so it only flies low where that hides it.");
+            RouteAutoReplan = cfg.Bind(N, "AutoReplan", true, "Re-plan a planned route (from the jet's position) when the known enemy radar picture changes.");
 
             const string S = "Safety";
             StickOverride = cfg.Bind(S, "StickOverrideThreshold", 0.35f, "Pitch/roll stick deflection (0-1) that disconnects the autopilot, like a paddle switch. 1.01 disables stick override.");
@@ -152,7 +200,7 @@ namespace AutopilotMod
             RadarSize = cfg.Bind(D, "RadarPageSize", 0.40f, "Radar-coverage display size as a fraction of screen height.");
             RadarX = cfg.Bind(D, "RadarPagePositionX", 0.015f, "Radar-coverage display horizontal position (0 = left edge, 1 = right edge).");
             RadarY = cfg.Bind(D, "RadarPagePositionY", 0.97f, "Radar-coverage display vertical position (0 = top, 1 = bottom).");
-            RadarTargetAgl = cfg.Bind(D, "RadarTargetHeight", 150f, "Height above the ground (m) of the target the coverage map is drawn for: 5, 30, 150, 500 or 2000, or -1 = ALT: your own altitude above sea level. The TGT button cycles it.");
+            RadarTargetAgl = cfg.Bind(D, "RadarTargetHeight", 150f, "Height above the ground (m) of the target the coverage map is drawn for: 5, 30, 150, 500 or 2000, -1 = ALT: your own altitude above sea level, or -2 = MASK: the masking-height map (how low you must fly to stay unseen). The TGT button cycles it.");
             RadarEnemyRcs = cfg.Bind(D, "RadarEnemyRcs", 0f, new ConfigDescription("Radar cross section the ENMY coverage map is drawn for. 0 = your own aircraft's current RCS (it grows with external stores). The RCS buttons and the web mirror set it.", new AcceptableValueRange<float>(0f, 1000f)));
             RadarFriendlyRcs = cfg.Bind(D, "RadarFriendlyRcs", 1f, new ConfigDescription("Radar cross section the ALL/OWN coverage maps are drawn for (e.g. a stealthy enemy's). 0 = your own aircraft's current RCS. The RCS buttons and the web mirror set it.", new AcceptableValueRange<float>(0f, 1000f)));
             ShowDebug = cfg.Bind(D, "ShowDebugLine", false, "Show commanded vs actual rates and raw stick outputs on the MFD (useful when tuning).");
