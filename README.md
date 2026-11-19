@@ -56,7 +56,9 @@ push-buttons and a green-phosphor display. No Python, no virtual gamepad, no ViG
 ## Install and build
 
 1. Install BepInEx 5 (Mono) into the game folder. The Thunderstore `BepInExPack` for Nuclear
-   Option is the easiest option.
+   Option is the easiest option. Then set `HideManagerGameObject = true` under `[Chainloader]` in
+   `BepInEx\config\BepInEx.cfg`. Otherwise the game removes BepInEx's plugin object after loading.
+   The log still says the mod is ready, but no keys work and the web mirror never starts.
 2. Point the build at your game: edit `NuclearOptionDir` in `AutopilotMod.csproj`, or pass
    `-p:NuclearOptionDir="C:\path\to\Nuclear Option"` to `dotnet build`.
 3. Run `dotnet build -c Release`. The build copies `AutopilotMod.dll` into
