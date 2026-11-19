@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace AutopilotMod
 {
-    [BepInPlugin(Guid, "Autopilot MFD", "2.0.0")]
+    [BepInPlugin(Guid, "Autopilot MFD", "1.0.0")]
     public class AutopilotPlugin : BaseUnityPlugin
     {
         public const string Guid = "com.yourname.autopilotmod";
