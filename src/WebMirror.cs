@@ -1090,6 +1090,17 @@ function webMap() {
     }
     ctx.globalAlpha = 1;
 
+    // airbases: ringed runway symbol + name; ours, enemy (once spotted), neutral
+    const ar = Math.max(6, 0.012 * S);
+    ctx.font = font(0.018, S); ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.lineWidth = Math.max(1.5, 0.003 * S);
+    for (const [x, z, side, name] of st.abs || []) {
+      const qx = sx(x), qy = sy(z);
+      if (qx < -W || qy < -H || qx > 2 * W || qy > 2 * H) continue;
+      ctx.strokeStyle = ctx.fillStyle = [SITE[0], RED, '#b0b0b0'][side];
+      ctx.beginPath(); ctx.arc(qx, qy, ar, 0, 2 * Math.PI); ctx.moveTo(qx - ar * 0.6, qy + ar * 0.6); ctx.lineTo(qx + ar * 0.6, qy - ar * 0.6); ctx.stroke();
+      ctx.fillText(name, qx, qy + ar * 1.3);
+    }
+
     // contacts: the map's own icons, colours and headings; selected targets boxed
     const cs = Math.max(8, 0.016 * S);
     for (const c of st.con || []) {

@@ -3,147 +3,119 @@ using System;
 namespace AutopilotMod
 {
     /// <summary>
-    /// Online estimate of how the airframe (fly-by-wire included) answers the stick on one axis,
-    /// by recursive least squares with forgetting.
+    /// Online estimate of how much rate the stick really gives on one axis (fly-by-wire included), so the
+    /// rate loops keep their tuning when the airframe changes (damage, stores), plus a guard that backs a
+    /// loop off if it starts to chatter.
     ///
-    /// Model, per physics tick, in "model units" (stick x the rate per stick our FBW model predicts):
-    ///     dq[k+1] = a * dq[k] + b1 * du[k] + b2 * du[k-1]
-    /// where dq is the tick-to-tick change of body rate and du that of the model-scaled stick (u[k] is
-    /// the stick applied between ticks k and k+1). Differencing drops any steady trim/gravity bias.
-    /// From it:
-    ///     Ratio = (b1 + b2) / (1 - a)   steady rate per model unit: 1 = the FBW model is exact
-    ///     B     = (b1 + b2) / dt        rate acceleration per model unit (what INDI inverts)
-    /// It only updates while the stick moves (pilot or autopilot), so steady flight can't drift it,
-    /// and it is blended with the prior until it has seen enough excitation.
+    /// Ratio = measured rate / rate the FBW model predicts for the same stick (1 = the model is exact). It
+    /// is a least-squares fit of the rate against the model's rate, both band-passed to the slow part of
+    /// the motion (swings of about 0.4 s to 2 s, i.e. manoeuvres): faster than that is where the game's
+    /// several-tick delay and the airframe's lag live, slower is trim drift. The model's rate is first
+    /// lagged by the prior response time so the two line up. An earlier short-window estimate (one tick
+    /// of delay assumed) read the game's late answer as a weak stick, pinned at its floor and made both
+    /// loops 2.4-3x too aggressive: a 7.5 Hz limit cycle in a recorded flight. This one, replayed on a
+    /// recorded flight, read pitch 1.0-1.2 and a steady roll value from 270 to 416 m/s.
+    ///
+    /// Detune (1 = off, up to 4) multiplies the Ratio the loops use: while the stick reverses faster than
+    /// 6 times a second with real amplitude (a limit cycle, from a wrong estimate or anything else) it
+    /// grows, softening the loop, and it lets go over about 20 s once the stick is quiet.
     /// </summary>
     internal sealed class EffectivenessRls
     {
-        private const int N = 3;
-        private const float Forget = 0.995f;    // ~4 s of excited samples at 50 Hz
-        private const float P0 = 1f, PMax = 10f;
-        private const float ExciteMin = 0.002f;  // rad/s^2: |du|+|du_prev| below this = no information
-        private const float WarmUp = 60f;        // excited samples before the estimate is half trusted
+        private const float Memory = 10f;     // s of excited flight the estimate remembers (forgets only while learning)
+        private const float HighPass = 2f;    // s: slower than this is trim drift, not the stick's doing
+        private const float LowPass = 0.4f;   // s: faster than this is the game's delay and the airframe's lag
+        private const float ExciteMin = 1e-8f; // (rad/s)^2 of band-passed model rate: below = nothing to learn
+        private const float WarmUp = 3f;      // s of excited flight before the estimate is half trusted
 
         private readonly float tau0;
-        private float a, b1, b2, a0, bSum0, dt0 = -1f;
-        private readonly float[] P = new float[N * N];
-        private readonly float[] phi = new float[N], gain = new float[N], pphi = new float[N];
-        private float qPrev = float.NaN, uPrev = float.NaN, dqPrev = float.NaN, duPrev = float.NaN;
+        private bool started;
+        private float uLag, uSlow, xLo, qSlow, yLo, sxx, sxy, excited;
+        private float uFastBase, uFastPrev, reversals, chatter;
 
-        /// <summary>Excited samples seen; 0 = pure prior.</summary>
-        public float Samples { get; private set; }
+        /// <summary>Excited seconds seen; 0 = pure prior.</summary>
+        public float Samples => excited;
 
-        /// <param name="tau0">Prior time constant (s) of the rate response. Small = conservative for INDI.</param>
+        /// <summary>Loop softening from the chatter guard: 1 = none, up to 4.</summary>
+        public float Detune { get; private set; } = 1f;
+
+        /// <param name="tau0">Prior time constant (s) of the rate response.</param>
         public EffectivenessRls(float tau0)
         {
             this.tau0 = tau0;
-            Reset(0.02f);
         }
 
         public void Reset(float dt)
         {
-            dt0 = dt;
-            a0 = (float)Math.Exp(-dt / tau0);
-            bSum0 = 1f - a0;   // Ratio = 1 at the prior
-            a = a0;
-            b1 = bSum0;
-            b2 = 0f;
-            Array.Clear(P, 0, P.Length);
-            for (int i = 0; i < N; i++) P[i * N + i] = P0;
-            Samples = 0f;
-            qPrev = uPrev = dqPrev = duPrev = float.NaN;
+            started = false;
+            sxx = sxy = excited = 0f;
+            reversals = chatter = 0f;
+            Detune = 1f;
         }
 
-        /// <summary>Blend of estimate and prior, by how much excitation has been seen.</summary>
-        private float Trust => Samples / (Samples + WarmUp);
+        private float Trust => excited / (excited + WarmUp);
 
-        private float ABlend => a0 + (a - a0) * Trust;
-        private float BSum => bSum0 + (b1 + b2 - bSum0) * Trust;
+        /// <summary>Not learning this tick (the pilot flying): keep the estimate, restart the filters when it resumes.</summary>
+        public void Pause() => started = false;
 
-        /// <summary>Steady rate per model unit (1 = the FBW model is exact), clamped to [0.4, 2.5].
-        /// Computed from the raw estimate and only then blended toward 1: blending a and b first
-        /// would mix a fast prior pole with a slow estimated one and miss badly.</summary>
-        public float Ratio => 1f + (Clamp((b1 + b2) / Math.Max(1f - a, 1e-3f), 0.4f, 2.5f) - 1f) * Trust;
+        /// <summary>Learned rate per model unit (clamped to [0.4, 2.5], blended toward 1 until trusted), times Detune.</summary>
+        public float Ratio => (1f + (Clamp(sxx > 0f ? sxy / sxx : 1f, 0.4f, 2.5f) - 1f) * Trust) * Detune;
 
-        /// <summary>Rate acceleration (1/s) per model unit, clamped to [0.3, 3] x the prior.</summary>
-        public float B => Clamp(BSum, 0.3f * bSum0, 3f * bSum0) / dt0;
+        /// <summary>Rate acceleration (1/s) per model unit: the ratio over the prior response time (what INDI inverts).</summary>
+        public float B => Ratio / tau0;
 
-        internal string Raw => $"a {a:F4} b1 {b1:F4} b2 {b2:F4} a0 {a0:F4} b0 {bSum0:F4}";
+        internal string Raw => $"sxy/sxx {(sxx > 0f ? sxy / sxx : float.NaN):F3} excited {excited:F1}s detune {Detune:F2}";
 
-        /// <summary>Response time constant (s) implied by the estimate.</summary>
-        public float Tau => -dt0 / (float)Math.Log(Clamp(ABlend, 0.05f, 0.9995f));
+        /// <summary>Response time constant (s) the loops assume: the prior.</summary>
+        public float Tau => tau0;
 
         /// <summary>
         /// One physics tick: q = body rate measured now (rad/s), uModel = stick applied since the last
-        /// tick times the FBW model's rate per stick (rad/s).
+        /// tick times the FBW model's rate per stick (rad/s), stick = that stick (-1..1).
         /// </summary>
-        public void Observe(float q, float uModel, float dt)
+        public void Observe(float q, float uModel, float stick, float dt)
         {
-            if (Math.Abs(dt - dt0) > 1e-5f) Reset(dt);
-            if (!float.IsNaN(qPrev))
+            if (!(dt > 0f)) return;
+            if (!started)
             {
-                // dq = q[k+1]-q[k]; du = u[k]-u[k-1] (uPrev holds u[k-1])
-                float dq = (q - qPrev) / dt;
-                float du = float.IsNaN(uPrev) ? float.NaN : (uModel - uPrev) / dt;
-                if (!float.IsNaN(dqPrev) && !float.IsNaN(du) && !float.IsNaN(duPrev))
-                    Update(dq, dqPrev, du, duPrev);
-                dqPrev = dq;
-                duPrev = du;
+                started = true;
+                uLag = uSlow = uModel;
+                qSlow = q;
+                xLo = yLo = 0f;
+                uFastBase = stick;
+                uFastPrev = 0f;
             }
-            qPrev = q;
-            uPrev = uModel;
+            float up = Lp(ref uLag, uModel, tau0, dt);
+            float x = Lp(ref xLo, up - Lp(ref uSlow, up, HighPass, dt), LowPass, dt);
+            float y = Lp(ref yLo, q - Lp(ref qSlow, q, HighPass, dt), LowPass, dt);
+            if (x * x >= ExciteMin)
+            {
+                float lambda = (float)Math.Exp(-dt / Memory);
+                sxx = lambda * sxx + x * x;
+                sxy = lambda * sxy + x * y;
+                excited = Math.Min(excited + dt, 1e6f);
+            }
+            Guard(stick, dt);
         }
 
-        private void Update(float y, float dqk, float duk, float dukm1)
+        /// <summary>Chatter guard: reversals of the stick's fast part (above ~2 Hz) with amplitude, per second.</summary>
+        private void Guard(float stick, float dt)
         {
-            // Every tick carries information about the response (a settling rate shows a), but only
-            // a moving stick shows the gain. Forget old data only while excited, so long steady
-            // stretches can't wind the covariance up (the classic RLS blow-up) or erase the estimate.
-            bool excited = Math.Abs(duk) + Math.Abs(dukm1) >= ExciteMin / dt0;
-            if (!excited && Math.Abs(dqk) < 1e-4f && Math.Abs(y) < 1e-4f) return; // nothing to learn
-            float lambda = excited ? Forget : 1f;
+            float fast = stick - Lp(ref uFastBase, stick, 0.08f, dt);
+            bool flip = Math.Abs(fast) > 0.01f && fast * uFastPrev < 0f;
+            if (Math.Abs(fast) > 0.01f) uFastPrev = fast;
+            reversals += ((flip ? 1f / dt : 0f) - reversals) * Math.Min(1f, dt / 0.5f); // per second, over ~0.5 s
+            chatter += (fast * fast - chatter) * Math.Min(1f, dt / 0.5f);
+            if (reversals > 6f && chatter > 0.02f * 0.02f)
+                Detune = Math.Min(4f, Detune * (1f + dt));   // doubles in ~0.7 s
+            else
+                Detune = 1f + (Detune - 1f) * (float)Math.Exp(-dt / 20f);
+        }
 
-            phi[0] = dqk;
-            phi[1] = duk;
-            phi[2] = dukm1;
-            float denom = lambda;
-            for (int i = 0; i < N; i++)
-            {
-                float s = 0f;
-                for (int j = 0; j < N; j++) s += P[i * N + j] * phi[j];
-                pphi[i] = s;
-                denom += phi[i] * s;
-            }
-            if (!(denom > 1e-9f) || float.IsInfinity(denom)) return;
-            for (int i = 0; i < N; i++) gain[i] = pphi[i] / denom;
-            float err = y - (a * dqk + b1 * duk + b2 * dukm1);
-            a += gain[0] * err;
-            b1 += gain[1] * err;
-            b2 += gain[2] * err;
-            float trace = 0f;
-            for (int i = 0; i < N; i++)
-            for (int j = 0; j < N; j++)
-            {
-                P[i * N + j] = (P[i * N + j] - gain[i] * pphi[j]) / lambda;
-                if (i == j) trace += P[i * N + j];
-            }
-            if (trace > PMax)
-                for (int i = 0; i < N * N; i++) P[i] *= PMax / trace;
-
-            if (float.IsNaN(a) || float.IsNaN(b1) || float.IsNaN(b2))
-            {
-                Reset(dt0);
-                return;
-            }
-            // Keep the parameters physical (stable, positive gain) so a bad stretch can't run away.
-            a = Clamp(a, 0f, 0.9995f);
-            float bs = b1 + b2;
-            if (bs < 0.03f * bSum0 || bs > 8f * bSum0)
-            {
-                b1 = Clamp(bs, 0.03f * bSum0, 8f * bSum0);
-                b2 = 0f;
-            }
-            if (excited) Samples = Math.Min(Samples + 1f, 1e6f);
+        private static float Lp(ref float s, float v, float tau, float dt)
+        {
+            s += (v - s) * dt / (tau + dt);
+            return s;
         }
 
         internal static float Clamp(float v, float lo, float hi) => v < lo ? lo : v > hi ? hi : v;
@@ -196,7 +168,9 @@ namespace AutopilotMod
         /// Call every physics tick (autopilot on or off) with the measured rate, the stick that was
         /// applied since the last tick, and the FBW model's rate per stick.
         /// </summary>
-        public void Observe(float q, float uApplied, float model, float dt, float filterHz)
+        /// <param name="learn">false = the pilot is flying: the effectiveness estimate holds (hand-flown stick, through
+        /// mouse aim and full-stick rate limits, read the roll as weak in a recorded flight)</param>
+        public void Observe(float q, float uApplied, float model, float dt, float filterHz, bool learn = true)
         {
             float alpha = 1f - (float)Math.Exp(-2.0 * Math.PI * filterHz * dt);
             for (int i = uHist.Length - 1; i > 0; i--) uHist[i] = warm ? uHist[i - 1] : uApplied;
@@ -215,7 +189,8 @@ namespace AutopilotMod
                 uF += alpha * (uSync - uF);
             }
             qPrev = q;
-            Rls.Observe(q, uApplied * model, dt);
+            if (learn) Rls.Observe(q, uApplied * model, uApplied, dt);
+            else Rls.Pause();
         }
 
         /// <summary>Stick (-1..1) for a commanded body rate.</summary>
@@ -225,7 +200,7 @@ namespace AutopilotMod
         public float Command(float qCmd, float q, float model, float bandwidth, bool adaptive, float uFallback)
         {
             if (!warm) return uFallback;
-            float b = (adaptive ? Rls.B : 1f / tauPrior) * Math.Max(model, 1e-3f);
+            float b = (adaptive ? Rls.B : Rls.Detune / tauPrior) * Math.Max(model, 1e-3f); // the chatter guard softens it either way
             float du = EffectivenessRls.Clamp(IncrementGain * (bandwidth * (qCmd - q) - qdotF) / b, -0.25f, 0.25f);
             LastIncrement = du;
             return EffectivenessRls.Clamp(uF + du, -1f, 1f);

@@ -146,6 +146,7 @@ namespace AutopilotMod
 
             // ---------------- vertical command ----------------
             raltFiltered += s.VerticalSpeed * dt + (s.RadarAlt - raltFiltered) * Mathf.Clamp01(2f * dt);
+            if (s.RadarAlt < raltFiltered) raltFiltered = s.RadarAlt; // surface closer: at once (FlyVertical)
             float maxVs = Mathf.Lerp(RotorMaxVs, cfg.MaxClimbRate.Value, b);
             float k = cfg.AltitudeGain.Value;
             float a = Mathf.Lerp(Mathf.Min(cfg.AltitudeCaptureAccel.Value, RotorCaptureAccel), cfg.AltitudeCaptureAccel.Value, b);

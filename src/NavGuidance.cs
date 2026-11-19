@@ -183,14 +183,31 @@ namespace AutopilotMod
 
         /// <summary>
         /// Distance before a waypoint to start turning onto the next leg, so the turn rolls out on it:
-        /// turn radius x tan(half the course change), never more than half the next leg.
+        /// turn radius x tan(half the course change), never more than the next leg (half of it made a fast jet's
+        /// long turns start too late, and swing up to 50 deg past the new leg). Plus half the
+        /// <paramref name="rollInSeconds"/> it takes to roll into the turn, flown at speed before the turn builds.
         /// </summary>
-        public static float TurnLead(float speed, float maxBankDeg, float courseChangeDeg, float nextLegLength)
+        public static float TurnLead(float speed, float maxBankDeg, float courseChangeDeg, float nextLegLength, float rollInSeconds = 0f)
         {
             float bank = Math.Max(5f, maxBankDeg) * (float)Math.PI / 180f;
             float radius = speed * speed / (9.81f * (float)Math.Tan(bank));
             float half = Math.Min(Math.Abs(courseChangeDeg), 150f) * 0.5f * (float)Math.PI / 180f;
-            return Math.Min(radius * (float)Math.Tan(half), nextLegLength * 0.5f);
+            return Math.Min(radius * (float)Math.Tan(half) + 0.5f * speed * rollInSeconds, nextLegLength);
+        }
+
+        /// <summary>
+        /// The turn onto a leg sequenced at its turn lead. L1 alone, a turn radius out, waits until it is within L1
+        /// (0.6 R for a jet) of the new leg, then turns too late and swings far past it. So the turn is flown as the
+        /// arc the lead was sized for: at least <paramref name="arcAccel"/> (m/s^2) toward the new leg
+        /// (<paramref name="sign"/> + = right), until the ground track is within 1 s of that turn of the leg's
+        /// course. False = the turn is done (L1 alone from here).
+        /// </summary>
+        public static bool ArcTurn(ref float accel, float sign, float speed, float arcAccel, float trackDeg, float legCourseDeg)
+        {
+            float left = sign * ((((legCourseDeg - trackDeg) % 360f) + 540f) % 360f - 180f);
+            if (left <= arcAccel / Math.Max(speed, 1f) * 57.29578f) return false;
+            accel = sign * Math.Max(sign * accel, arcAccel);
+            return true;
         }
 
         /// <summary>Course from (x,z) toward (x2,z2), degrees from north.</summary>

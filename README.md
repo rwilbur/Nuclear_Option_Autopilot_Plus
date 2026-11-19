@@ -97,7 +97,8 @@ switches to the 10x step.
 
 - **Lateral:**
   - **HDG** flies to the heading bug, banking up to `MaxBank` (35°) for at most a `MaxTurnRate`
-    turn (standard rate, 3°/s).
+    turn (standard rate, 3°/s). It steers on the ground track, which stays steady while the nose
+    yaws in a roll, so fast low-level turns don't rock the wings.
   - **ATT** holds a bank angle; below 7° of bank it snaps to wings-level.
   - **NAV** flies a route (see [Routes and NAV mode](#routes-and-nav-mode)).
 - **Vertical:**
@@ -118,6 +119,8 @@ switches to the 10x step.
   full stick gives the airframe at its current speed. The lift the climb or descent needs is taken
   first, and the turn gets the rest. Terrain that needs a pull-up takes lift from the turn, so the
   jet rolls back toward wings level. `MaxBank` still caps the bank.
+  - **No bank swings in TF:** a new pull-up rolls toward level at once, but the bank lets go of it
+    over 2 s, so TF's quick pull/push cycles don't rock the wings with them.
 - **A/T** is independent of the A/P, as in real jets. It holds speed with the throttle.
 - **Re-syncing.** Pressing an already-selected mode, or the target readout beside a rocker,
   re-syncs that target to the current value. **SYNC** re-syncs everything.
@@ -157,16 +160,20 @@ weapon-safety option on, or a left click on a button could also fire the gun.
 **Floor and bank limit.** These work in every vertical mode.
 - **Height source.** The mod runs its own radar altimeter every physics tick. The game's own
   value updates only every 0.1 s, and over shallow water it measures to the seabed.
+- **Smoothing that never lags low.** RALT and TF hold a smoothed radar height so brief spikes
+  don't jerk the jet, but a surface coming closer (a rock, a ship, the far side of a crest) is
+  taken at once: at 2 m and 350 m/s, half a second of lag was 175 m of ground.
 - **What TF (and RALT) hold.** The same reference as the HUD's `R` (the bottom of the gear).
-- **Floor.** The A/P keeps the lowest point of the airframe (wingtips, nose, tail, gear) at
-  least `GroundFloorMeters` (1.5 m) above the surface.
+- **Floor.** The A/P keeps the lowest point of the airframe (wingtips, nose, tail, gear, and
+  every hanging store and pylon) at least `GroundFloorMeters` (1.5 m) above the surface.
 - **Sink limit.** Close to the floor, the allowed sink rate shrinks with clearance
   (`FloorGain`). Further out, it is limited to what a `FloorPullUpG` (1 g) pull-up can still
   stop at the floor. This is the barrier-function idea used in automatic ground-collision
   avoidance [[9]](#ref-gcas), [[10]](#ref-vista).
 - **Bank limit.** Near the surface, bank is limited so the low wingtip can't dip in. The MFD
   shows `BANK LIM - LOW` while this is active. The jet then turns as hard as that bank allows,
-  more slowly, and stays down.
+  more slowly, and stays down, with the wingtip 0.5 m above the floor. For a wingtip about 1 m off
+  the surface in a hard low turn, set **FLOOR** on the SET page to 0.5 m.
 
 **Terrain look-ahead** (`TerrainLookahead`, on by default).
 - **What it samples.** Every physics tick, 12 rays sample terrain, ship decks and the sea along
@@ -175,8 +182,9 @@ weapon-safety option on, or a left click on a button could also fire the gun.
   a 1 s reaction and a `FloorPullUpG` pull-up, and never climbs steeper than
   `MaxFlightPathAngle`.
 - **On the MFD.** `TERRAIN AHEAD - CLIMB` shows while the look-ahead is driving the climb.
-- **All modes.** It works in every vertical mode, so BALT over mountains climbs too. TF has its
-  own, finer scan (below).
+- **All modes but TF.** It works in BALT, RALT and V/S, so BALT over mountains climbs too. TF uses
+  its own, finer scan instead (below): this one's 5 m margin would hold TF, and a wingtip in a hard
+  low bank, well above the clearance you set.
 
 **Terrain following (TF).** Jets only. Press **TF** (the MFD shows `TERR FLW`). The vertical
 rocker sets the clearance to hold, never less than `MinClearanceMeters` (2 m). TF can dip several
@@ -336,8 +344,12 @@ The radar MFD's bottom row plans and flies routes.
   picture changes: a new, lost or moved site, or a jam-state change. This needs `AutoReplan` and
   happens at most every 10 s.
 - **Path following.** NAV uses L1 guidance [[6]](#ref-l1). The L1 distance is kept to at least
-  0.6 × the turn radius at `MaxBank`, so a fast jet's wide turns can't make it circle. It turns
-  onto the next leg one turn-lead before each waypoint, so turns roll out on the new leg. Its
+  0.6 × the turn radius, so a fast jet's wide turns can't make it circle. The radius is the
+  turn the jet can fly now: `MaxBank`, the bank its g budget allows, the wingtip's room over
+  the surface (low in TF that can be 20°), and `MaxTurnRate`. It starts the turn onto the next
+  leg one turn-lead (plus half the time it takes to roll in, up to the whole next leg) before
+  each waypoint and flies it as that arc, so turns roll out on the new leg. L1 alone, starting a
+  turn radius out, waited until it was within 0.6 R of the new leg and swung far past it. The
   turn is flown as a turn rate through the same lift vector as HDG, so TF's climbs still come
   first. The A/P MFD shows the waypoint number and the distance to go.
 - **Background work.** The planner runs on a worker thread. While a planned route is active, the
@@ -509,21 +521,32 @@ speed:    speed err (+ energy coupling with the A/P) -> throttle
   integrator.
 - **Filtering.** The measured acceleration and the applied stick go through the same low-pass
   filter, so their lags match [[2]](#ref-smeur).
-- **Safety margin.** Only `IndiIncrementGain` (0.5) of each increment is applied. In the
-  self-check model, that kept overshoot under 2% even with a 60 ms airframe delay and a 2x
-  effectiveness error.
-- **Rollback.** `Law = Classic` restores the previous law: feedforward through a model of the
-  game's fly-by-wire (read via Harmony), plus PI on rate.
+- **Safety margin.** Only `IndiIncrementGain` (0.5) of each increment is applied.
+- **Tuned to the game's airframe.** Fitted to recorded A/P manoeuvres, the game's fly-by-wire
+  answers the stick in about 0.04 s, 1-2 physics ticks late, on both axes. INDI assumes that
+  response; it used to assume 0.15 s (pitch) and 0.1 s (roll), believed the stick 3-4x weaker than
+  it is, overshot every step and limit-cycled at 7.5 Hz. With the measured response and
+  `IndiPitchBandwidth` / `IndiRollBandwidth` 10, a model of it tracks the rate within 0.4°/s
+  without chatter from 0.02 to 0.3 s response, 1-4 ticks of delay and 0.5-2x effectiveness.
+- **Classic** (`Law = Classic`): feedforward through a model of the game's fly-by-wire (read via
+  Harmony), plus PI on rate. It leans on that model, so INDI copes better with damage.
 
-**Learning the airframe** (`AdaptiveEffectiveness`).
-- **What it learns.** For both laws, a recursive-least-squares estimator learns how much pitch and
-  roll rate the stick really gives on the jet you are flying. It learns from your stick inputs as
-  well as the A/P's.
-- **How the estimate stays stable.** It only forgets old data while the stick is moving, so long
-  steady stretches can't wind it up. This is a variant of variable forgetting
-  [[5]](#ref-forgetting). Online estimation of control effectiveness is how adaptive INDI handles
-  model changes [[3]](#ref-delft-ahq), [[4]](#ref-racing-rls).
-- **Checking it.** DATA shows the law and the learned ratios, e.g. `INDI x1.08/0.93` (1 = the
+**Learning the airframe** (`AdaptiveEffectiveness`, on by default).
+- **What it learns.** For both laws, how much pitch and roll rate the stick really gives on the jet
+  you are flying, relative to the fly-by-wire model. If damage or stores change that, the rate loops
+  keep their tuning. It learns from your stick inputs as well as the A/P's.
+- **How.** A least-squares fit of the measured rate against the model's, both band-passed to the
+  slow part of the motion (swings of about 0.4 to 2 s, i.e. manoeuvres). The game answers the stick
+  several physics ticks late; an earlier estimate that assumed one tick read that as a weak stick,
+  pinned at its floor and made both loops limit-cycle at 7.5 Hz in a recorded flight. Replayed on a
+  recorded flight, this one read steady values from 270 to 416 m/s. It remembers about 10 s of
+  manoeuvring and forgets only while it has something to learn [[5]](#ref-forgetting), so steady
+  flight can't drift it. Online estimation of control
+  effectiveness is how adaptive INDI handles model changes [[3]](#ref-delft-ahq), [[4]](#ref-racing-rls).
+- **Chatter guard.** Whether learning is on or not, if a loop's stick starts reversing faster than
+  6 times a second with real amplitude, that loop is softened (up to 4x) until it calms, then
+  released over about 20 s.
+- **Checking it.** DATA shows the law and the learned ratios, e.g. `x1.08/0.93` (1 = the
   fly-by-wire model was exact).
 
 **Why the original script oscillated.** The first version of this autopilot was a Python PID
@@ -545,7 +568,7 @@ the learned effectiveness. Most low-level settings can also be changed in flight
 | Altitude captures feel lazy | Raise `AltitudeCaptureAccel` (round-out) or `MaxClimbRate` (big changes) |
 | Final settle onto altitude is slow | Raise `AltitudeGain` |
 | Sea skim wanders in height | Raise `FlightPathGain` (with `FlightPathDamping` about 1.25x it) |
-| Nose or wings buzz (INDI) | Lower `IndiIncrementGain`, or `IndiPitchBandwidth` / `IndiRollBandwidth`; or set `Law = Classic` |
+| Nose or wings buzz (INDI) | Lower `IndiPitchBandwidth` / `IndiRollBandwidth` (10), then `IndiIncrementGain`; or set `Law = Classic` |
 | Rate loops sluggish (INDI) | Raise `IndiPitchBandwidth` / `IndiRollBandwidth` |
 | Nose buzzes (Classic) | Lower `PitchRateGain` |
 | Wings rock in HDG/ATT (Classic) | Lower `BankGain`, then `RollRateGain` |

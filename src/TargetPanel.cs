@@ -163,7 +163,7 @@ namespace AutopilotMod
                 ? hud.aircraft.weaponManager.GetTargetList() : null;
         }
 
-        private static void Str(StringBuilder sb, string s)
+        internal static void Str(StringBuilder sb, string s)
         {
             sb.Append('"');
             foreach (char c in s ?? "")

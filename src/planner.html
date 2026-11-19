@@ -91,9 +91,9 @@ function l1Accel(px, pz, vx, vz, ax, az, bx, bz, period, damping, maxAcc) {
   return { acc: k * v * v / l1 * Math.sin(eta), toGo: len - along };
 }
 // distance before a waypoint to turn onto the next leg (L1Guidance.TurnLead)
-function turnLead(speed, maxBankDeg, changeDeg, nextLen) {
+function turnLead(speed, maxBankDeg, changeDeg, nextLen, rollIn = 0) {
   const radius = speed * speed / (G * Math.tan(Math.max(5, maxBankDeg) * RAD));
-  return Math.min(radius * Math.tan(Math.min(Math.abs(changeDeg), 150) / 2 * RAD), nextLen / 2);
+  return Math.min(radius * Math.tan(Math.min(Math.abs(changeDeg), 150) / 2 * RAD) + 0.5 * speed * rollIn, nextLen);
 }
 const course = (x, z, x2, z2) => (Math.atan2(x2 - x, z2 - z) / RAD + 360) % 360;
 const deltaDeg = (a, b) => ((b - a) % 360 + 540) % 360 - 180;
@@ -105,25 +105,31 @@ function predict(wps, af, set, v0) {
   let hdg = Math.atan2(wps[1].x - x, wps[1].z - z), w = 0, lx = x, lz = z, i = 1, t = 0;
   const dt = 0.05, lag = 1, accel = 8; // shortcut: A/T modelled as 8 m/s^2 either way; real thrust/drag differ by airframe
   const period = set.l1Period || 20, damping = set.l1Damping || 0.75;
-  const maxAcc = G * Math.tan(clamp(set.maxBank, 5, 70) * RAD);
+  let arc = 0; // +1/-1 while flying the turn onto the leg just sequenced (L1Guidance.ArcTurn)
   time[0] = 0; miss[0] = 0;
   path.push([x, z]);
   while (i < n && t < 7200) {
     for (let k = Math.max(0, i - 1); k <= i; k++) miss[k] = Math.min(miss[k], Math.hypot(wps[k].x - x, wps[k].z - z));
     const b = wps[i], vx = v * Math.sin(hdg), vz = v * Math.cos(hdg), vg = Math.max(v, 40);
+    // the turn the jet can fly now (MaxBank, the g budget, MaxTurnRate): L1's limit and the turn leads use it
+    const om = turnRate(af, set, vg), maxAcc = om * vg;
     const l1 = l1Accel(x, z, vx, vz, lx, lz, b.x, b.z, period, damping, maxAcc);
-    let lead = 0;
+    let lead = 0, change = 0;
     if (i + 1 < n) {
       const nx = wps[i + 1];
-      lead = turnLead(vg, set.maxBank, deltaDeg(course(lx, lz, b.x, b.z), course(b.x, b.z, nx.x, nx.z)), Math.hypot(nx.x - b.x, nx.z - b.z));
+      change = deltaDeg(course(lx, lz, b.x, b.z), course(b.x, b.z, nx.x, nx.z));
+      lead = turnLead(vg, Math.atan(maxAcc / G) / RAD, change, Math.hypot(nx.x - b.x, nx.z - b.z), 2 * lag); // a 1st-order lag is late by lag: a roll-in of 2 x lag
     }
     if (l1.toGo <= Math.max(lead, 0)) { // passed (or turning onto the next leg)
       time[i] = t; lx = b.x; lz = b.z; i++;
       if (i < n && wps[i].s) vt = wps[i].s;
+      arc = Math.sign(change);
       continue;
     }
+    // fly the turn onto the new leg as the arc its lead was sized for, until 1 s of turn from its course
+    if (arc && arc * deltaDeg(hdg / RAD, course(lx, lz, b.x, b.z)) > om / RAD) l1.acc = arc * Math.max(arc * l1.acc, maxAcc);
+    else arc = 0;
     // the HDG law flies NAV's turn rate (acc / v), no faster than MaxTurnRate and the g budget allow
-    const om = turnRate(af, set, vg);
     w += (clamp(l1.acc / vg, -om, om) - w) * dt / lag;
     hdg += w * dt; x += vx * dt; z += vz * dt; t += dt;
     v += clamp(vt - v, -accel * dt, accel * dt);

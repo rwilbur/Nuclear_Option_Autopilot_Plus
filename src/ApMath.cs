@@ -272,6 +272,16 @@ namespace AutopilotMod
             return (float)Math.Atan2(ah, Math.Max(lv, g));
         }
 
+        /// <summary>
+        /// Vertical lift (m/s^2) the bank is pointed for: follows a bigger pull at once (a pull-up rolls toward
+        /// wings level straight away) but lets go of it over <paramref name="release"/> s. Terrain following
+        /// swaps between pulls and pushes faster than a jet can roll; pointing the bank at each one swung it
+        /// back and forth with them (a roll oscillation, a vibration at high speed, where the same heading
+        /// correction is more sideways g). NaN <paramref name="held"/> = start from <paramref name="lv"/>.
+        /// </summary>
+        public static float LiftHold(float held, float lv, float dt, float release) =>
+            float.IsNaN(held) || lv >= held ? lv : held + (lv - held) * Math.Min(1f, dt / Math.Max(release, dt));
+
         /// <summary>Normal acceleration (m/s^2) to pull at the jet's actual bank: the wanted lift projected onto its lift axis.</summary>
         public static float LiftAlong(float lv, float ah, float bank) => lv * (float)Math.Cos(bank) + ah * (float)Math.Sin(bank);
 

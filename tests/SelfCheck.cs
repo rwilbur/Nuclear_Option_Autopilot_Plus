@@ -87,6 +87,27 @@ internal static class SelfCheck
         ApMath.LiftBank(ref lv, ref ah, 80f, 9.81f, out room);
         Check(Near(lv, 78f) && Near(ah, (float)Math.Sqrt(80f * 80f - 78f * 78f), 0.01f) && Near(room, ah, 0.01f), "over budget: the climb keeps its lift, the turn gets the rest");
 
+        // ---- lift hold: TF's pull/push swings (+-2 g at 2 Hz) with a 1 g turn wanted must not swing the bank ----
+        {
+            const float g = 9.81f, dt = 0.02f;
+            float hold0 = float.NaN, rawLo = 99f, rawHi = -99f, heldLo = 99f, heldHi = -99f;
+            for (int k = 0; k < 250; k++)
+            {
+                float lvNow = g + 2f * g * (float)Math.Sin(2.0 * Math.PI * 2.0 * k * dt), a1 = g, a2 = g, l1 = lvNow;
+                hold0 = ApMath.LiftHold(hold0, lvNow, dt, 2f);
+                float l2 = hold0;
+                float raw = ApMath.LiftBank(ref l1, ref a1, 80f, g, out _) * 57.3f, hold = ApMath.LiftBank(ref l2, ref a2, 80f, g, out _) * 57.3f;
+                rawLo = Math.Min(rawLo, raw); rawHi = Math.Max(rawHi, raw);
+                if (k >= 50) { heldLo = Math.Min(heldLo, hold); heldHi = Math.Max(heldHi, hold); }
+            }
+            Check(rawHi - rawLo > 20f, $"(model) pointing the bank at each TF swing moves it {rawHi - rawLo:F0} deg");
+            Check(heldHi - heldLo < 4f, $"lift hold: bank steady through TF's swings ({heldHi - heldLo:F1} deg)");
+            Check(ApMath.LiftHold(g, 4f * g, dt, 2f) == 4f * g, "lift hold: a new pull-up is followed at once (rolls toward level)");
+            float rel = 4f * g;
+            for (int k = 0; k < 200; k++) rel = ApMath.LiftHold(rel, g, dt, 2f);
+            Check(rel < 2f * g, $"lift hold: lets go of a past pull within 4 s ({rel / g:F2} g)");
+        }
+
         // ---- the pull at the bank the jet actually has ----
         float rad = (float)Math.PI / 180f, cos35 = (float)Math.Cos(35f * rad);
         float held = ApMath.LiftPull(9.81f, 6f * 9.81f, 35f * rad, 9.81f); // hard turn wanted, bank held at 35 deg by the wingtip limit
@@ -176,6 +197,19 @@ internal static class SelfCheck
         Check(L1Converges(500f, 0f) && L1Converges(-3000f, 90f) && L1Converges(200f, 180f), "L1: converges onto the track from offsets/intercepts");
         float lead = L1Guidance.TurnLead(200f, 35f, 90f, 50000f);
         Check(lead > 5000f && lead < 6000f, $"turn lead for a 90 deg turn at 200 m/s, 35 deg bank = R ({lead:F0} m)");
+        foreach (float cv in new[] { 150f, 250f })
+        foreach (float turn in new[] { 45f, 90f, 135f })
+        {
+            float over = NavCornerOvershoot(cv, turn, true), old = NavCornerOvershoot(cv, turn, false);
+            Check(over < 6f, $"NAV corner {turn} deg at {cv} m/s rolls out on the new leg ({over:F0} deg past its course; L1 alone: {old:F0})");
+        }
+        // a slow jet at a steep bank and roll-limited, and the same held to 20 deg by the wingtip over the water
+        foreach (float turn in new[] { 45f, 90f, 135f })
+        {
+            float steep = NavCornerOvershoot(108f, turn, true, 60f, 60f, 30f), low = NavCornerOvershoot(108f, turn, true, 20f, 20f, 30f);
+            float wrong = NavCornerOvershoot(108f, turn, true, 60f, 20f, 30f);
+            Check(steep < 6f && low < 6f, $"NAV corner {turn} deg at 108 m/s, 30 deg/s roll: 60 deg bank {steep:F0}, wingtip-limited 20 deg {low:F0} deg past (planned for 60, flown at 20: {wrong:F0})");
+        }
 
         // ---- radar masking heights ----
         CheckMaskHeights();
@@ -193,8 +227,46 @@ internal static class SelfCheck
             float rms = RateLoopModel(tau, delay, ratio, 0f, out float overshoot, out float estRatio, out bool sat);
             Check(rms < 0.035f && overshoot < 0.35f && !sat,
                 $"INDI tau {tau} delay {delay} ratio {ratio}: rms {rms:F3} rad/s, overshoot {overshoot:P0}, saturated {sat}");
-            if (delay <= 1)
-                Check(Math.Abs(estRatio / ratio - 1f) < 0.3f, $"RLS ratio tau {tau} delay {delay}: est {estRatio:F2} vs true {ratio}");
+            Check(Math.Abs(estRatio / ratio - 1f) < 0.3f, $"learned ratio tau {tau} delay {delay}: est {estRatio:F2} vs true {ratio}");
+        }
+        // INDI as the game flies it: the measured airframe (about 0.04 s, 1-2 ticks late, 60 Hz) and around it, the mod's
+        // prior (0.04 s) and bandwidth (10): no chatter, rate tracked within 0.4 deg/s. The old prior (0.15 s, bandwidth 3)
+        // reversed the stick 13 times a second on the same airframe (the recorded 7.5 Hz limit cycle).
+        foreach (float tauTrue in new[] { 0.02f, 0.04f, 0.08f })
+        foreach (int delay in new[] { 1, 2, 3 })
+        foreach (float ratio in new[] { 0.5f, 1f, 2f })
+        {
+            IndiGameModel(tauTrue, delay, ratio, 0.04f, 10f, out float rev, out float rms);
+            Check(rev < 3f && rms < 0.4f, $"INDI on the game's airframe (tau {tauTrue}, {delay} ticks, ratio {ratio}): {rev:F1} reversals/s, rms {rms:F2} deg/s");
+        }
+        {
+            IndiGameModel(0.04f, 2, 0.7f, 0.15f, 3f, out float rev, out _);
+            Check(rev > 6f, $"(model) the old INDI prior chatters on the game's airframe: {rev:F1} reversals/s");
+        }
+
+        // the game: 60 Hz, a 4-5 tick answer (what pinned the old one-tick estimate at its floor)
+        foreach (int delay in new[] { 4, 5 })
+        foreach (float ratio in new[] { 0.5f, 1f, 2f })
+        {
+            float rms = RateLoopModel(0.2f, delay, ratio, 0f, out _, out float est, out bool sat, 1f / 60f);
+            Check(Math.Abs(est / ratio - 1f) < 0.3f && rms < 0.05f && !sat, $"60 Hz, delay {delay} ticks, ratio {ratio}: learned {est:F2}, rms {rms:F3}");
+        }
+        {
+            // damage at 20 s: the stick suddenly gives half the rate; 20 s later the estimate has followed
+            RateLoopModel(0.2f, 4, 1f, 0f, out _, out float est, out _, 1f / 60f, 0.5f);
+            Check(Math.Abs(est / 0.5f - 1f) < 0.3f, $"learns damage: stick halved at 20 s, learned {est:F2} by 40 s");
+        }
+        {
+            // chatter guard: a 7.5 Hz +-0.1 stick cycle (the recorded INDI limit cycle) softens the loop within 2 s;
+            // 0.4 manoeuvre steps every 2 s don't
+            var g = new EffectivenessRls(0.15f);
+            for (int i = 0; i < 120; i++) g.Observe(0f, 0f, 0.1f * (float)Math.Sin(2.0 * Math.PI * 7.5 * i / 60.0), 1f / 60f);
+            float cycling = g.Detune;
+            var h = new EffectivenessRls(0.15f);
+            float most = 1f;
+            for (int i = 0; i < 600; i++) { h.Observe(0f, 0f, (i / 120) % 2 == 0 ? 0.4f : -0.4f, 1f / 60f); most = Math.Max(most, h.Detune); }
+            Check(cycling > 2f, $"chatter guard: 7.5 Hz stick cycle softens the loop ({cycling:F2}x)");
+            Check(most < 1.05f, $"chatter guard: manoeuvre steps leave it alone ({most:F2}x)");
         }
         {
             float rms = RateLoopModel(0.3f, 1, 1f, 0.4f, out float os, out _, out bool sat);
@@ -248,6 +320,7 @@ internal static class SelfCheck
         {
             float ralt = alt - TfTerrain(terrain, x);
             raltF += v * (float)Math.Sin(gamma) * dt + (ralt - raltF) * Math.Min(1f, 2f * dt);
+            if (ralt < raltF) raltF = ralt; // surface closer: at once
             sinceSweep += dt;
             if (sinceSweep >= 0.1f)
             {
@@ -383,6 +456,37 @@ internal static class SelfCheck
         return Math.Abs(x) < 15f && !strayed;
     }
 
+    /// <summary>NAV (FlightController.UpdateNav) through one corner of turnDeg between 30 km legs (long enough for each turn's lead): point mass at
+    /// speed v, planning its turns for planBank, flying no steeper than maxBank, rolling at roll deg/s. Most heading (deg) past the
+    /// new leg's course. arc = false: L1 alone.</summary>
+    private static float NavCornerOvershoot(float v, float turnDeg, bool arc, float planBank = 35f, float maxBank = 35f, float roll = 25f)
+    {
+        const float dt = 0.02f, g = 9.81f;
+        float maxAcc = g * (float)Math.Tan(planBank * Math.PI / 180), a = turnDeg * (float)Math.PI / 180f;
+        float[] wx = { 0f, 0f, 30000f * (float)Math.Sin(a) }, wz = { 0f, 30000f, 30000f + 30000f * (float)Math.Cos(a) };
+        float x = 0f, z = 0f, hdg = 0f, bank = 0f, sign = 0f, over = 0f;
+        int leg = 1;
+        for (int i = 0; i < 20000 && leg < 3; i++)
+        {
+            float vx = v * (float)Math.Sin(hdg), vz = v * (float)Math.Cos(hdg);
+            float acc = L1Guidance.LateralAccel(x, z, vx, vz, wx[leg - 1], wz[leg - 1], wx[leg], wz[leg], 20f, 0.75f, maxAcc, out _, out float toGo);
+            if (leg == 1 && toGo <= L1Guidance.TurnLead(v, planBank, turnDeg, 30000f, arc ? planBank / roll : 0f))
+            {
+                leg = 2;
+                sign = arc ? 1f : 0f;
+                continue;
+            }
+            if (sign != 0f && !L1Guidance.ArcTurn(ref acc, sign, v, maxAcc, hdg * 180f / (float)Math.PI, turnDeg)) sign = 0f;
+            float bankCmd = Math.Max(-maxBank, Math.Min(maxBank, (float)(Math.Atan(acc / g) * 180 / Math.PI)));
+            bank += Math.Max(-roll * dt, Math.Min(roll * dt, bankCmd - bank));
+            hdg += g * (float)Math.Tan(bank * Math.PI / 180) / v * dt;
+            x += vx * dt;
+            z += vz * dt;
+            if (leg == 2) over = Math.Max(over, (hdg - a) * 180f / (float)Math.PI);
+        }
+        return over;
+    }
+
     private static void CheckPlanner()
     {
         // 100 x 100 cells of 500 m; a radar in the middle sees everything within 12 km (even 5 m up),
@@ -448,14 +552,49 @@ internal static class SelfCheck
     /// steady pitching acceleration the stick must hold off. Flown by IndiAxis (with its RLS) on a
     /// square-wave rate command. Returns the RMS tracking error over the last 10 s.
     /// </summary>
-    private static float RateLoopModel(float tau, int delay, float ratio, float bias, out float overshoot, out float estRatio, out bool saturated)
+    /// <summary>
+    /// INDI with learning on a first-order rate response (tauTrue, delay ticks, effectiveness ratio) at the game's
+    /// 60 Hz, following +-0.05 rad/s rate steps every 2 s: stick reversals per second and the rate error (deg/s,
+    /// from 0.8 s after each step) over the last 10 s.
+    /// </summary>
+    private static void IndiGameModel(float tauTrue, int delay, float ratio, float tauPrior, float bandwidth, out float reversals, out float rms)
     {
-        const float dt = 0.02f, model = 0.6f, amp = 0.15f;
+        const float dt = 1f / 60f, model = 0.25f;
+        var axis = new IndiAxis(tauPrior) { IncrementGain = 0.5f };
+        var hist = new float[delay + 1];
+        float q = 0f, u = 0f, du0 = 0f, err2 = 0f;
+        int flips = 0, n = 0;
+        for (int i = 0; i < 60 * 30; i++)
+        {
+            float t = i * dt;
+            axis.Observe(q, u, model, dt, 5f);
+            float qCmd = (int)(t / 2f) % 2 == 0 ? 0.05f : -0.05f;
+            float uNew = axis.Command(qCmd, q, model, bandwidth, true, u);
+            if (t > 20f)
+            {
+                float d = uNew - u;
+                if (Math.Abs(d) > 0.002f && d * du0 < 0f) flips++;
+                if (Math.Abs(d) > 0.002f) du0 = d;
+                if (t % 2f > 0.8f) { err2 += (qCmd - q) * (qCmd - q); n++; }
+            }
+            u = uNew;
+            for (int k = delay; k > 0; k--) hist[k] = hist[k - 1];
+            hist[0] = u;
+            q += (ratio * model * hist[delay] - q) / tauTrue * dt;
+        }
+        reversals = flips / 10f;
+        rms = (float)Math.Sqrt(err2 / Math.Max(1, n)) * 57.3f;
+    }
+
+    private static float RateLoopModel(float tau, int delay, float ratio, float bias, out float overshoot, out float estRatio, out bool saturated,
+        float dt = 0.02f, float ratioAfter = float.NaN)
+    {
+        const float model = 0.6f, amp = 0.15f;
         var axis = new IndiAxis(0.15f) { IncrementGain = 0.5f };
         float q = 0f, u = 0f, err2 = 0f, peak = 0f;
         int n = 0, satTicks = 0;
         var hist = new float[delay + 1];
-        for (int i = 0; i < 2000; i++)
+        for (int i = 0; i < (int)(40f / dt); i++)
         {
             float t = i * dt;
             axis.Observe(q, u, model, dt, 5f);
@@ -464,7 +603,7 @@ internal static class SelfCheck
             if (Math.Abs(u) > 0.99f) satTicks++;
             for (int k = delay; k > 0; k--) hist[k] = hist[k - 1];
             hist[0] = u;
-            float demand = ratio * model * hist[delay];
+            float demand = (t >= 20f && !float.IsNaN(ratioAfter) ? ratioAfter : ratio) * model * hist[delay];
             q += ((demand - q) / tau + bias * (1f - (float)Math.Exp(-t))) * dt;
             if (t > 20f)
             {

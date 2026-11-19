@@ -1999,6 +1999,10 @@ namespace AutopilotMod
                     first = false;
                 }
 
+            // airbases: x, z, side (0 ours, 1 enemy, 2 neutral), name
+            sb.Append("],\"abs\":[");
+            Airbases(sb);
+
             // contacts: unit id, x, z, rotation (deg clockwise, null = upright), colour, icon texture id, sprite rect in
             // the PNG (x, y from the top, w, h), size factor, selected
             DynamicMap map = SceneSingleton<DynamicMap>.i;
@@ -2039,6 +2043,42 @@ namespace AutopilotMod
             for (int i = nav.Active; i < nav.Points.Count; i++)
                 sb.Append(i > nav.Active ? ",[" : "[").Append((int)nav.Points[i].X).Append(',').Append((int)nav.Points[i].Z).Append(",\"").Append(WaypointLabel(i)).Append("\"]");
             sb.Append("]}");
+        }
+
+        // enemy airbases our side has spotted: kept once seen (an airbase doesn't move), forgotten on a change of side
+        private readonly HashSet<Airbase> seenBases = new HashSet<Airbase>();
+        private FactionHQ seenBy;
+
+        /// <summary>Ours and neutral airbases always; an enemy one once our side knows where any of its buildings is.</summary>
+        private void Airbases(StringBuilder sb)
+        {
+            FactionHQ hq = me.NetworkHQ;
+            if (hq != seenBy) { seenBases.Clear(); seenBy = hq; }
+            bool first = true;
+            foreach (Airbase ab in FactionRegistry.airbaseLookup.Values)
+            {
+                if (ab == null || ab.disabled || ab.center == null) continue;
+                int side = ab.CurrentHQ == null ? 2 : ab.CurrentHQ == hq ? 0 : 1;
+                if (side == 1 && !seenBases.Contains(ab))
+                {
+                    if (hq == null || !Spotted(hq, ab)) continue;
+                    seenBases.Add(ab);
+                }
+                GlobalPosition p = ab.center.GlobalPosition();
+                sb.Append(first ? "[" : ",[").Append((int)p.x).Append(',').Append((int)p.z).Append(',').Append(side).Append(',');
+                TargetPanel.Str(sb, ab.SavedAirbase != null && !string.IsNullOrEmpty(ab.SavedAirbase.DisplayName) ? ab.SavedAirbase.DisplayName : ab.name);
+                sb.Append(']');
+                first = false;
+            }
+        }
+
+        private static bool Spotted(FactionHQ hq, Airbase ab)
+        {
+            foreach (Building b in ab.buildings)
+                if (b != null && hq.TryGetKnownPosition(b, out _)) return true;
+            foreach (Hangar h in ab.hangars) // a carrier's hangars sit on the ship
+                if (h != null && h.attachedUnit != null && hq.TryGetKnownPosition(h.attachedUnit, out _)) return true;
+            return false;
         }
 
         /// <summary>Global x/z -> position inside the screen rect (0,0 = its top-left).</summary>
