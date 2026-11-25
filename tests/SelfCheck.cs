@@ -273,6 +273,21 @@ internal static class SelfCheck
             Check(rms < 0.035f && !sat, $"INDI trims out a steady pitching moment (rms {rms:F3})");
         }
 
+        // ---- FBW air data: Unity body frame (x right, y up, z forward) to aerospace signs ----
+        {
+            const float D = AutopilotMod.Fbw.AirData.Rad2Deg;
+            // nose 10 deg above the flight path: the air comes from below and ahead, body velocity (0, -sin, cos)
+            float s10 = (float)Math.Sin(10.0 / D), c10 = (float)Math.Cos(10.0 / D);
+            Check(Near(AutopilotMod.Fbw.AirData.Alpha(0f, -s10 * 200f, c10 * 200f) * D, 10f), "nose-up AoA is positive");
+            Check(Near(AutopilotMod.Fbw.AirData.Alpha(0f, s10 * 200f, c10 * 200f) * D, -10f), "nose-down AoA is negative");
+            Check(Near(Math.Abs(AutopilotMod.Fbw.AirData.Alpha(0f, 0f, -200f) * D), 180f), "flying backwards reads +-180 deg, not 0");
+            Check(Near(AutopilotMod.Fbw.AirData.Beta(s10 * 200f, 0f, c10 * 200f) * D, 10f), "air from the right is positive sideslip");
+            Check(AutopilotMod.Fbw.AirData.Beta(0f, 0f, 0f) == 0f, "no sideslip at rest");
+            // Unity: +x rotation pitches the nose down, +z rolls left, +y yaws right
+            Check(AutopilotMod.Fbw.AirData.Q(0.5f) == -0.5f && AutopilotMod.Fbw.AirData.P(0.5f) == -0.5f && AutopilotMod.Fbw.AirData.R(0.5f) == 0.5f,
+                "body rates: nose-up q, right-roll p, nose-right r");
+        }
+
         Console.WriteLine(failures == 0 ? "Self-check passed." : $"{failures} check(s) failed.");
         return failures == 0 ? 0 : 1;
     }

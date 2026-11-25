@@ -100,6 +100,8 @@ namespace AutopilotMod
         public ConfigEntry<float> MfdY;
         public ConfigEntry<bool> ShowDebug;
         public ConfigEntry<bool> ExportAirframes;
+        public ConfigEntry<Fbw.FbwMode> FbwMode;
+        public ConfigEntry<bool> FbwTelemetry;
         public ConfigEntry<float> RadarSize;
         public ConfigEntry<float> RadarX;
         public ConfigEntry<float> RadarY;
@@ -230,6 +232,8 @@ namespace AutopilotMod
             GunHeatY = cfg.Bind(D, "GunHeatPositionY", 0.45f, "Gun-heat display vertical position (0 = top, 1 = bottom). Updated when you drag it.");
             ShowDebug = cfg.Bind(D, "ShowDebugLine", false, "Show commanded vs actual rates and raw stick outputs on the MFD (useful when tuning).");
 
+            FbwMode = cfg.Bind("FlyByWire", "Mode", Fbw.FbwMode.Off, "Fly-by-wire (in development). Off = the game's own fly-by-wire, untouched. Passthrough = test of the takeover: every control surface and jet engine gets its own inputs, copied from the stock ones exactly when the game would read them, so the jet flies exactly as stock.");
+            FbwTelemetry = cfg.Bind("FlyByWire", "Telemetry", false, "Development: log flight state, inputs and every surface's and engine's position each physics tick to BepInEx\\FbwLogs\\<aircraft>_<time>.csv (also with Mode = Off).");
             ExportAirframes = cfg.Bind("FlyByWire", "ExportAirframes", false, "Development: 2 s after you start flying a jet, write its rigidbodies, aero parts, control surfaces, engines, stock fly-by-wire settings and airfoil charts to BepInEx\\FbwAirframes\\<aircraft>.json (once per spawn). Used to build and check the fly-by-wire's airframe models.");
 
             const string M = "WebMirror";

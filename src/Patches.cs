@@ -17,6 +17,23 @@ namespace AutopilotMod
         }
     }
 
+    /// <summary>
+    /// Start of every physics tick, before ScheduleJobs copies each surface's inputs into its job: the
+    /// fly-by-wire's control step runs here, with the state the last physics step left.
+    /// </summary>
+    [HarmonyPatch(typeof(NuclearOption.Jobs.JobManager), "FixedUpdateEarly")]
+    internal static class FbwPreJobsPatch
+    {
+        private static void Prefix() => Fbw.FbwController.Current?.PreJobs();
+    }
+
+    /// <summary>After the pilot's inputs are filtered, before the engines' FixedUpdate reads them.</summary>
+    [HarmonyPatch(typeof(Aircraft), nameof(Aircraft.FilterInputs))]
+    internal static class FbwAfterFilterPatch
+    {
+        private static void Postfix(Aircraft __instance) => Fbw.FbwController.Current?.AfterFilter(__instance);
+    }
+
     /// <summary>The throttle lever is read in Update (and in FixedUpdate during auto-hover).</summary>
     [HarmonyPatch(typeof(PilotPlayerState), "PlayerThrottleAxis1Controls")]
     internal static class PlayerThrottlePatch

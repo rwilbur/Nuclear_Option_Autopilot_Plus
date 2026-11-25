@@ -15,6 +15,7 @@
     <Compile Include="..\src\NavGuidance.cs" />
     <Compile Include="..\src\RoutePlanner.cs" />
     <Compile Include="..\src\CoverageMath.cs" />
+    <Compile Include="..\src\Fbw\AirData.cs" />
   </ItemGroup>
 
 </Project>

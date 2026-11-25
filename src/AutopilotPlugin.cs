@@ -57,6 +57,7 @@ namespace AutopilotMod
             radarPage = new RadarCoveragePage(cfg, ap) { Report = Report };
             gunHeat = new GunHeatPage(cfg, Logger);
             airframeExport = new Fbw.AirframeExport(cfg.ExportAirframes, Logger);
+            Fbw.FbwController.Current = new Fbw.FbwController(cfg.FbwMode, cfg.FbwTelemetry, Logger);
             mirror = new WebMirror(cfg, Logger, Report, ap, mfd, radarPage, gunHeat);
             FlightPlanner.Init(Logger, cfg);
             ap.ApDisconnected += () =>
@@ -74,6 +75,8 @@ namespace AutopilotMod
         {
             SetCursorMode(false);
             mirror?.Dispose();
+            Fbw.FbwController.Current?.Shutdown();
+            Fbw.FbwController.Current = null;
             harmony?.UnpatchSelf();
             if (Instance == this) Instance = null;
         }

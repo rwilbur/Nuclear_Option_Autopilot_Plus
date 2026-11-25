@@ -129,22 +129,7 @@ namespace AutopilotMod.Fbw
             return file;
         }
 
-        /// <summary>
-        /// Every <typeparamref name="T"/> on the aircraft. Under complex physics each part is unparented
-        /// (AeroPart.CreateRB), so the root's children alone miss most of the jet: search every part.
-        /// </summary>
-        private static List<T> Find<T>(Aircraft ac) where T : Component
-        {
-            var seen = new HashSet<T>();
-            var list = new List<T>();
-            foreach (T c in ac.GetComponentsInChildren<T>(true))
-                if (seen.Add(c)) list.Add(c);
-            foreach (UnitPart p in ac.GetAllParts())
-                if (p != null)
-                    foreach (T c in p.GetComponentsInChildren<T>(true))
-                        if (seen.Add(c)) list.Add(c);
-            return list;
-        }
+        private static List<T> Find<T>(Aircraft ac) where T : Component => AircraftLink.Find<T>(ac);
 
         /// <summary>The game's airfoil chart grid (AeroJob_Math): 128 points over +-pi.</summary>
         private static float ChartAlpha(int i) => (i - 64) * 0.04908734f;
