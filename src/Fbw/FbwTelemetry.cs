@@ -31,7 +31,8 @@ namespace AutopilotMod.Fbw
             w = new StreamWriter(Path, false, new UTF8Encoding(false), 1 << 16);
 
             sb.Append("t,dt,held,speed,rho,mass,alpha,beta,p,q,r,pdot,qdot,rdot,nz,pitch,roll,yaw,throttle");
-            sb.Append(",aeroErrF,aeroErrM,aeroWorst,aeroSkip,pdotPred,qdotPred,rdotPred");
+            sb.Append(",aeroErrF,aeroErrM,aeroWorst,aeroSkip,pdotPred,qdotPred,rdotPred,pdotProbe,qdotProbe,rdotProbe");
+            sb.Append(",mOtherL,mOtherM,mOtherN,mThrustL,mThrustM,mThrustN,cgX,cgY,cgZ");
             foreach (SurfaceLink s in link.Surfaces) sb.Append(',').Append(s.Name).Append("_tgt,").Append(s.Name).Append("_ang,").Append(s.Name).Append("_split");
             for (int i = 0; i < link.Engines.Count; i++) sb.Append(",e").Append(i).Append("_nzx,e").Append(i).Append("_nzy,e").Append(i).Append("_thrust,e").Append(i).Append("_thr");
             w.WriteLine(sb.ToString());
@@ -52,8 +53,16 @@ namespace AutopilotMod.Fbw
             N(i.pitch); N(i.roll); N(i.yaw); N(i.throttle);
             // the aero check of the previous tick, and its predicted acceleration over the step this row measured
             N(check.ForceError); N(check.MomentError); N(check.WorstPart); N(check.Skipped);
-            if (check.Predict(out float pp, out float qp, out float rp)) { N(pp * D); N(qp * D); N(rp * D); }
-            else sb.Append(",,,");
+            if (check.Predict(out AeroCheck.Prediction p))
+            {
+                Model.V3 a = p.Itemised, b = p.Probe;
+                N(a.X * D); N(a.Y * D); N(a.Z * D);
+                N(b.X * D); N(b.Y * D); N(b.Z * D);
+                N(p.Unexplained.X); N(p.Unexplained.Y); N(p.Unexplained.Z);
+                N(p.Thrust.X); N(p.Thrust.Y); N(p.Thrust.Z);
+                N(p.CgFromRoot.X); N(p.CgFromRoot.Y); N(p.CgFromRoot.Z);
+            }
+            else sb.Append(",,,,,,,,,,,,,,,");
             foreach (SurfaceLink sf in link.Surfaces)
             {
                 if (sf.JobReady) { N(sf.Target); N(sf.Angle); N(sf.Split); }

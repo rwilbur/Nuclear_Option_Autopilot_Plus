@@ -69,7 +69,7 @@ namespace AutopilotMod.Fbw
                 if (telemetry.Value)
                 {
                     tlm ??= new FbwTelemetry(link);
-                    check ??= new AeroCheck(link);
+                    check ??= new AeroCheck(link, log);
                     tlm.Row(link, state, hold, check);
                 }
                 else CloseTelemetry();
@@ -140,6 +140,7 @@ namespace AutopilotMod.Fbw
 
         private void CloseTelemetry()
         {
+            check?.Dispose();
             check = null;
             if (tlm == null) return;
             log.LogInfo("FBW telemetry: " + tlm.Path);

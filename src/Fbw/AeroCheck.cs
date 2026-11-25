@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using AutopilotMod.Fbw.Model;
+using BepInEx.Logging;
 using HarmonyLib;
 using NuclearOption.Jobs;
 using UnityEngine;
@@ -29,6 +30,7 @@ namespace AutopilotMod.Fbw
         private static readonly AccessTools.FieldRef<JetNozzle, Transform> NozzleTransform = AccessTools.FieldRefAccess<JetNozzle, Transform>("thrustTransform");
 
         private readonly AircraftLink link;
+        private readonly ManualLogSource log;
         private readonly List<AeroPart> parts;
         private readonly HashSet<Rigidbody> bodies = new HashSet<Rigidbody>();
         private readonly MassProps mass = new MassProps();
@@ -36,8 +38,10 @@ namespace AutopilotMod.Fbw
 
         // the pass of the current tick, waiting for the engines and then the next tick's measurement
         private bool pending;
-        private V3 moment, omega, cg;
+        private V3 mAero, mThrust, mDamp, omega, cg;
         private Quaternion rootRot;
+        private Vector3 rootPos;
+        private int ticks;
 
         /// <summary>Last pass: Σ|F_model − F_game| / Σ|F_game| over the parts.</summary>
         public float ForceError { get; private set; }
@@ -48,14 +52,17 @@ namespace AutopilotMod.Fbw
         /// <summary>Last pass: parts left out (touching water).</summary>
         public int Skipped { get; private set; }
 
-        public AeroCheck(AircraftLink link)
+        public AeroCheck(AircraftLink link, ManualLogSource log)
         {
             this.link = link;
+            this.log = log;
             parts = AircraftLink.Find<AeroPart>(link.Aircraft);
             AeroJobSettings settings = AeroJob(JobManager.i);
             lift = settings.liftCharts.ToArray();
             drag = settings.dragCharts.ToArray();
             density = LevelInfo.airDensityChart.ToArray();
+            ForceProbe.Start(bodies);
+            ForceProbe.Reset(link.Aircraft.rb.position);
         }
 
         /// <summary>After the aero job finished, before the physics step.</summary>
@@ -124,19 +131,22 @@ namespace AutopilotMod.Fbw
             // Unity's per-rigidbody damping in the coming step: v *= 1 / (1 + dt c), likewise w with angularDrag
             float dt = Time.fixedDeltaTime;
             Rigidbody root = link.Aircraft.rb;
-            V3 w = V(root.angularVelocity);
+            V3 damp = V3.Zero;
             foreach (Rigidbody rb in bodies)
             {
                 float k = rb.drag / (1f + dt * rb.drag);
-                mGame += V3.Cross(V(rb.worldCenterOfMass) - cg, -k * rb.mass * V(rb.velocity));
+                damp += V3.Cross(V(rb.worldCenterOfMass) - cg, -k * rb.mass * V(rb.velocity));
                 float ka = rb.angularDrag / (1f + dt * rb.angularDrag);
                 Quaternion axes = rb.rotation * rb.inertiaTensorRotation;
                 Vector3 local = Quaternion.Inverse(axes) * rb.angularVelocity;
-                mGame -= ka * V(axes * Vector3.Scale(rb.inertiaTensor, local));
+                damp -= ka * V(axes * Vector3.Scale(rb.inertiaTensor, local));
             }
-            moment = mGame;
-            omega = w;
+            mAero = mGame;
+            mDamp = damp;
+            mThrust = V3.Zero;
+            omega = V(root.angularVelocity);
             rootRot = root.rotation;
+            rootPos = root.position;
             pending = true;
         }
 
@@ -150,25 +160,57 @@ namespace AutopilotMod.Fbw
             {
                 if (n == null || NozzleShare(n) <= 0f) continue;
                 Transform tt = NozzleTransform(n);
-                moment += V3.Cross(V(tt.position) - cg, V(tt.forward * NozzleThrust(n)));
+                mThrust += V3.Cross(V(tt.position) - cg, V(tt.forward * NozzleThrust(n)));
             }
         }
 
         /// <summary>
-        /// Start of the next tick: the rigid-body angular acceleration (aerospace body axes, rad/s^2) the last
-        /// tick's forces predict, to set against the measured one. False if there was no pass.
+        /// Start of the next tick: what the last tick's forces predict for the physics step just taken, to set
+        /// against the measured acceleration. False if there was no pass. Then starts the probe's next tick.
         /// </summary>
-        public bool Predict(out float pDot, out float qDot, out float rDot)
+        public bool Predict(out Prediction p)
         {
-            pDot = qDot = rDot = 0f;
-            if (!pending) return false;
-            pending = false;
-            V3 a = mass.AngularAccel(moment, omega);
-            Vector3 body = Quaternion.Inverse(rootRot) * new Vector3(a.X, a.Y, a.Z);
-            pDot = AirData.P(body.z);
-            qDot = AirData.Q(body.x);
-            rDot = AirData.R(body.y);
-            return true;
+            p = default;
+            bool had = pending;
+            if (pending)
+            {
+                pending = false;
+                // itemised: the game's aero forces, the nozzle thrust, Unity's damping
+                p.Itemised = Body(mass.AngularAccel(mAero + mThrust + mDamp, omega));
+                // everything any script applied (the probe), with the same damping
+                V3 probe = V(ForceProbe.MomentAbout(new Vector3(cg.X, cg.Y, cg.Z)));
+                p.Probe = Body(mass.AngularAccel(probe + mDamp, omega));
+                p.Unexplained = Body(probe - mAero - mThrust); // N m: scripted moment the itemised sum lacks
+                p.Thrust = Body(mThrust);
+                Vector3 cgRel = Quaternion.Inverse(rootRot) * (new Vector3(cg.X, cg.Y, cg.Z) - rootPos);
+                p.CgFromRoot = new V3(cgRel.x, cgRel.y, cgRel.z); // Unity body axes (x right, y up, z forward)
+            }
+            ForceProbe.Reset(link.Aircraft.rb.position);
+            if (++ticks % 600 == 0) log.LogInfo("FBW force sources (by moment, so far): " + ForceProbe.Callers());
+            return had;
+        }
+
+        /// <summary>Stop the probe and report its sources.</summary>
+        public void Dispose()
+        {
+            log.LogInfo("FBW force sources (by moment): " + ForceProbe.Callers());
+            ForceProbe.ClearCallers();
+            ForceProbe.Stop();
+        }
+
+        /// <summary>A world vector in aerospace body axes (roll, pitch, yaw): see <see cref="AirData"/>.</summary>
+        private V3 Body(V3 w)
+        {
+            Vector3 b = Quaternion.Inverse(rootRot) * new Vector3(w.X, w.Y, w.Z);
+            return new V3(AirData.P(b.z), AirData.Q(b.x), AirData.R(b.y));
+        }
+
+        internal struct Prediction
+        {
+            public V3 Itemised, Probe;  // rad/s^2 (p, q, r)
+            public V3 Unexplained;      // N m (roll, pitch, yaw)
+            public V3 Thrust;           // N m (roll, pitch, yaw)
+            public V3 CgFromRoot;       // m, Unity body axes
         }
 
         /// <summary>The aero job's wind at a point (AeroJob_Math.CalcWind): level wind plus Perlin turbulence.</summary>

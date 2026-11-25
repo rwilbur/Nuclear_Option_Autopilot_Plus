@@ -32,7 +32,9 @@ for (const file of process.argv.slice(2)) {
   if (!aeroOk) failed++;
 
   // 2. rigid-body prediction vs measured, per axis: least-squares gain k (measured = k * predicted), R^2, residual
-  for (const [axis, meas, pred] of [['roll ', 'pdot', 'pdotPred'], ['pitch', 'qdot', 'qdotPred'], ['yaw  ', 'rdot', 'rdotPred']]) {
+  const fits = [['roll ', 'pdot', 'pdotPred'], ['pitch', 'qdot', 'qdotPred'], ['yaw  ', 'rdot', 'rdotPred']];
+  if (col('pdotProbe') >= 0) fits.push(['roll  (probe)', 'pdot', 'pdotProbe'], ['pitch (probe)', 'qdot', 'qdotProbe'], ['yaw   (probe)', 'rdot', 'rdotProbe']);
+  for (const [axis, meas, pred] of fits) {
     const pairs = rows.map(r => [r[col(pred)], r[col(meas)]]).filter(([x, y]) => !Number.isNaN(x) && !Number.isNaN(y));
     let sxx = 0, sxy = 0, syy = 0, sr = 0;
     for (const [x, y] of pairs) { sxx += x * x; sxy += x * y; syy += y * y; }
@@ -41,6 +43,13 @@ for (const file of process.argv.slice(2)) {
     const r2 = 1 - sr / syy;
     const rmsMeas = Math.sqrt(syy / pairs.length), rmsRes = Math.sqrt(sr / pairs.length);
     console.log(`   ${axis} accel: measured rms ${rmsMeas.toFixed(1)} deg/s^2, prediction error rms ${rmsRes.toFixed(1)}, fit gain ${k.toFixed(3)}, R^2 ${r2.toFixed(3)}`);
+  }
+  if (col('mOtherM') >= 0) {
+    const rms = n => Math.sqrt(rows.reduce((s, r) => s + (r[col(n)] || 0) ** 2, 0) / rows.length);
+    console.log(`   scripted moment not in the itemised sum (rms N m): roll ${rms('mOtherL').toFixed(0)}  pitch ${rms('mOtherM').toFixed(0)}  yaw ${rms('mOtherN').toFixed(0)}` +
+      `   (thrust moment rms: ${rms('mThrustL').toFixed(0)} / ${rms('mThrustM').toFixed(0)} / ${rms('mThrustN').toFixed(0)})`);
+    const cg = ['cgX', 'cgY', 'cgZ'].map(n => pct(rows.map(r => r[col(n)]), 0.5).toFixed(3));
+    console.log(`   CG from the root rigidbody (median, Unity body axes x/y/z, m): ${cg.join(' / ')}`);
   }
 }
 process.exit(failed ? 1 : 0);
