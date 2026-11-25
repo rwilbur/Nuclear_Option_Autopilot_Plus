@@ -605,6 +605,7 @@ internal static class SelfCheck
             }
         }
         CheckSweep();
+        CheckFoilKnee(dir);
         CheckFbwEnvelope(dir, jets, cases);
     }
 
@@ -628,6 +629,7 @@ internal static class SelfCheck
             ("pull+roll 90", 90f, 3f, t => (t > 0.2f ? -1f : 0f, t > 1f ? 1f : 0f, 0f)),
             ("roll stop 140", 140f, 4f, t => (0f, t > 0.2f && t < 2f ? -1f : 0f, 0f)),
             ("roll stop 200", 200f, 4f, t => (0f, t > 0.2f && t < 2f ? -1f : 0f, 0f)),
+            ("roll stop pull 147", 147f, 4f, t => (t > 0.2f && t < 2f ? -1f : 0f, t > 0.2f && t < 2f ? -1f : 0f, 0f)), // Vortex log, 25 Nov
         };
         foreach (string file in System.IO.Directory.GetFiles(dir, "*.json").OrderBy(x => x))
         foreach (var run in runs)
@@ -668,6 +670,25 @@ internal static class SelfCheck
             sum += up ? Math.Max(0f, Math.Max(t1, t2)) : Math.Min(0f, Math.Min(t1, t2));
         }
         return sum;
+    }
+
+    /// <summary>Surface stall from the lift curve's knee: the game's built-in curve and the Vortex's plateau foil.</summary>
+    private static void CheckFoilKnee(string dir)
+    {
+        const int N = AutopilotMod.Fbw.Model.Plate.ChartPoints;
+        float[] sine = new float[N];
+        for (int i = 0; i < N; i++)
+        {
+            float deg = (i - 64) * 2.8125f;
+            sine[i] = Math.Abs(deg) <= 36f ? 1.8f * (float)Math.Sin(5f * deg / 57.29578f) : 0f;
+        }
+        new AutopilotMod.Fbw.Control.FoilPeaks(sine).Of(0, out float lo, out float hi);
+        Check(hi > 12f && hi < 18.1f && lo < -12f && lo > -18.1f, $"built-in lift curve stalls at its knee ({lo:F1} / {hi:F1} deg)");
+        var j = (System.Collections.Generic.Dictionary<string, object>)MiniJson.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "FS-20 Vortex.json")));
+        var foil = (System.Collections.Generic.Dictionary<string, object>)((System.Collections.Generic.List<object>)j["airfoils"])[0];
+        float[] lift = ((System.Collections.Generic.List<object>)foil["lift"]).Select(x => (float)(double)x).ToArray();
+        new AutopilotMod.Fbw.Control.FoilPeaks(lift).Of(0, out lo, out hi);
+        Check(hi > 12f && hi < 22f, $"Vortex surface foil stalls at its knee, not its 45 deg plateau peak ({hi:F1} deg)");
     }
 
     /// <summary>The coordinated-roll LP against vertex enumeration on small random cases (where the need is reachable).</summary>

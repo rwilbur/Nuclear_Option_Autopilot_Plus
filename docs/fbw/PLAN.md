@@ -253,6 +253,13 @@ Choices, and the evidence for them:
   them where they pushed the roll on. Now one idle for over 6 ticks heads for neutral at servo speed. Homing at once traded
   with using it (Ifrit chatter 0.1 -> 15). Bench roll stop from 140 m/s: Vortex 84 -> 38 deg after release, Ifrit
   98 -> 76, Revoker 107 -> 93. The rest is servo speed: the ailerons need 0.4 s just to get back to neutral.
+- Vortex retest: it still rolled another 455 deg after release from a rolling pull (147 m/s, AoA 17, beta -19). The left
+  elevon sat at 63-65 deg (its whole travel) and over-rolled the jet (200 deg/s on a 141 command); after release the elevons
+  and rudders went to 45-54 deg and it sped up again. The usable range kept each surface's local AoA under its foil's lift
+  peak, and the Vortex's foil peaks at 45 deg at the end of a plateau (0.90 at 17 deg, 1.00 at 45). Stall is now the
+  knee: the first chart segment with under 25% of the lift slope at zero (17 deg there, 15 for the built-in curve).
+  Bench release from a rolling pull: Vortex 101 -> 26 deg after release, Revoker 144 -> 96, Ifrit 63 -> 49. The cost:
+  Vortex rolling pull at 150 m/s, 118 -> 85 deg/s.
 
 Bench: a rigid-body simulator built on the effector models and each jet's export. It adds deliberate model
 error, delay, servo lag and part flex, because a plant that matches the model exactly makes everything look

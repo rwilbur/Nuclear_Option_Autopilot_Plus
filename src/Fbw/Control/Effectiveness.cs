@@ -18,20 +18,37 @@ namespace AutopilotMod.Fbw.Control
             pos = new float[foils];
             for (int f = 0; f < foils; f++)
             {
-                float best = float.MinValue, worst = float.MaxValue;
-                for (int i = 0; i < Plate.ChartPoints; i++)
-                {
-                    float deg = (i - 64) * 0.04908734f * Rad2Deg, cl = lift[f * Plate.ChartPoints + i];
-                    if (deg >= 0f && deg <= 60f && cl > best) { best = cl; pos[f] = deg; }
-                    if (deg <= 0f && deg >= -60f && cl < worst) { worst = cl; neg[f] = deg; }
-                }
+                int o = f * Plate.ChartPoints;
+                pos[f] = Knee(lift, o, +1);
+                neg[f] = Knee(lift, o, -1);
             }
         }
 
-        /// <summary>Stall angles of a foil; the game's built-in curve (foil −1, CL = 1.8 sin 5α) peaks at ±18 deg.</summary>
+        /// <summary>Share of the lift slope at zero below which the curve counts as stalled.</summary>
+        public const float KneeShare = 0.25f;
+
+        // Where the lift stops growing usefully on one side (deg): the first chart segment whose slope is under KneeShare of the slope
+        // at zero, or the peak if that comes first (within 60 deg). Not the peak alone: the Vortex's surfaces' foil climbs 0.90 -> 1.00
+        // from 17 to 45 deg, and surfaces allowed onto that plateau sat at 50-65 deg, stalled, and kept a roll going (log, 25 Nov).
+        private static float Knee(float[] lift, int o, int side)
+        {
+            const int Zero = 64;
+            float step = 0.04908734f * Rad2Deg;
+            float slope0 = side * (lift[o + Zero + side] - lift[o + Zero]);
+            float best = float.MinValue, bestDeg = 0f;
+            for (int k = 1; k * step <= 60f && Zero + side * (k + 1) >= 0 && Zero + side * (k + 1) < Plate.ChartPoints; k++)
+            {
+                float here = side * lift[o + Zero + side * k], next = side * lift[o + Zero + side * (k + 1)];
+                if (here > best) { best = here; bestDeg = k * step; }
+                if (slope0 > 0f && next - here < KneeShare * slope0) return side * k * step;
+            }
+            return side * bestDeg;
+        }
+
+        /// <summary>Stall angles of a foil (<see cref="Knee"/>); the game's built-in curve (foil −1, CL = 1.8 sin 5α) peaks at ±18 deg, knee about 15.</summary>
         public void Of(int foil, out float stallNeg, out float stallPos)
         {
-            if (foil < 0 || pos == null || foil >= pos.Length) { stallNeg = -18f; stallPos = 18f; return; }
+            if (foil < 0 || pos == null || foil >= pos.Length) { stallNeg = -15f; stallPos = 15f; return; }
             stallNeg = neg[foil];
             stallPos = pos[foil];
         }
