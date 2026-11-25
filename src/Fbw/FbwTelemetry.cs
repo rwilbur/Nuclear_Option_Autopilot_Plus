@@ -34,6 +34,7 @@ namespace AutopilotMod.Fbw
             sb.Append(",aeroErrF,aeroErrM,aeroWorst,aeroSkip,pdotPred,qdotPred,rdotPred,pdotProbe,qdotProbe,rdotProbe");
             sb.Append(",mOtherL,mOtherM,mOtherN,mThrustL,mThrustM,mThrustN,cgX,cgY,cgZ");
             sb.Append(",flying,pCmd,qCmd,rCmd,nuP,nuQ,nuR,unmetP,unmetQ,unmetR");
+            sb.Append(",assist,alphaMax,alphaMin,liftSlope,pitchStiff,couplingK,qWant,qGov,psWant,psGov,predAlpha,predNz");
             foreach (SurfaceLink s in link.Surfaces) sb.Append(',').Append(s.Name).Append("_tgt,").Append(s.Name).Append("_ang,").Append(s.Name).Append("_split");
             for (int i = 0; i < link.Engines.Count; i++) sb.Append(",e").Append(i).Append("_nzx,e").Append(i).Append("_nzy,e").Append(i).Append("_thrust,e").Append(i).Append("_thr");
             w.WriteLine(sb.ToString());
@@ -72,8 +73,15 @@ namespace AutopilotMod.Fbw
                 N(law.P * D); N(law.Q * D); N(law.R * D);
                 N(indi.NuRoll * D); N(indi.NuPitch * D); N(indi.NuYaw * D);
                 N(indi.UnmetRoll * D); N(indi.UnmetPitch * D); N(indi.UnmetYaw * D);
+                // the envelope: limits, airframe numbers, what the pilot asked and what the governor handed on, its 0.5 s prediction
+                var fc = flight.Computer;
+                var gov = fc.Governor;
+                sb.Append(fc.Assist ? ",1" : ",0");
+                N(fc.AlphaMax * D); N(fc.AlphaMin * D); N(fc.LiftSlope); N(fc.PitchStiffness); N(fc.CouplingGain);
+                N(gov.Wanted * D); N(gov.Governed * D); N(gov.WantedRoll * D); N(gov.GovernedRoll * D);
+                N(gov.PredAlpha * D); N(gov.PredNz);
             }
-            else sb.Append(",0,,,,,,,,,");
+            else sb.Append(",0,,,,,,,,,,,,,,,,,,,,,");
             foreach (SurfaceLink sf in link.Surfaces)
             {
                 if (sf.JobReady) { N(sf.Target); N(sf.Angle); N(sf.Split); }

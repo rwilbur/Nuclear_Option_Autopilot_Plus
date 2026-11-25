@@ -143,8 +143,8 @@ Choices, and the evidence for them:
 | 0 | Game facts, airframe exporter | ✅ Facts doc written; all 10 jets exported to `tests/airframes/` (25 Nov 2026) |
 | 1 | Adapter + logging + passthrough | ✅ Revoker and Ifrit flights (25 Nov 2026): every surface matched the game's servo model to 0.0001° (`tests/fbw-log-check.js`) |
 | 2 | Effector models checked in game | ✅ See "Phase 2 findings" below (Compass, Revoker, Ifrit, Medusa, Vagrant flights, 25 Nov 2026) |
-| 3 | INDI + allocator, plain rate laws, Full mode | Bench and game step responses pass the HQ checks on a no-TVC jet, then a TVC jet |
-| 4 | Laws + envelope governor | Full-stick pulls, rolling pulls and releases stay inside limits on every jet |
+| 3 | INDI + allocator, plain rate laws, Full mode | ✅ Bench passes on the Revoker, Compass, Vortex and Ifrit; flown on the Compass, Vortex, Ifrit and Revoker (25 Nov 2026), Ifrit retest "much better" after splits became yaw effectors |
+| 4 | Laws + envelope governor | Bench ✅ (25 Nov 2026): full-stick pulls (200 and 110 m/s), rolling pulls, releases and pushes stay inside AoA and g on four jets, on and off model (see "Phase 4 findings"). In-game check pending |
 | 5 | Capacity limits: damage, stores, engine-out (throttle cut), ground steering | Bench damage cases fly without departure |
 | 6 | Multiplayer mode | Remote view matches (by construction); same laws pass the HQ checks |
 | 7 | Performance: timings, then threading / native if justified | Per-tick cost measured in game, with and without |
@@ -170,6 +170,36 @@ Choices, and the evidence for them:
 - **More effectors than surfaces and nozzles:** `DuctedThrustSystem` (the Vagrant's nozzles),
   `ReactionControlSystem` thrusters, and possibly `MagicTorqueController` (docs/fbw/PHASE0_FACTS.md
   section 5).
+
+### Phase 4 findings (bench, 25 Nov 2026)
+
+- **AoA limits come from the airframe's own lift curve,** swept with the game's plates on the clean airframe (surfaces
+  neutral, the CG's air on every part) every half second. Lift, not body-normal force: at high AoA drag adds a large
+  part along body up, so the normal force keeps rising long after the stall. On the fighters the lift curve is a long
+  plateau (Ifrit: lift slope 10 g/rad at 3 deg, about 1 g/rad from 20 deg, nominal peak at 42 deg). So the limit is the
+  lowest AoA giving 97% of peak lift: Revoker 33, Vortex 31, Ifrit 32, Compass 16, Vagrant 15, Alkyon 15 deg (stock
+  limiters 27, 25, 27, 10, 15, 15).
+- **The governor's model must include the effectors' capacity.** At low speed the nose takes about a second to start
+  and as long to stop. An ideal-loop model let the Ifrit run 16 deg past its limit at 110 m/s. The prediction now limits
+  each axis's acceleration to what the effectors reach at full travel, changing no faster than their servos allow, with
+  the same hedge the law applies. With it, 0.5 s AoA predictions are within 1–2 deg in pulls.
+- **Static pitch stiffness** (from the same plate sweep) shifts that capacity as AoA grows; on the unstable Revoker it
+  removes the nose-down authority past some AoA. Horizon: 1.5 s (the Gripen's 0.67 s was too short to see a slow stop).
+- **Rolling pulls: inertia coupling.** Rolling about the flight path pitches the nose up by
+  ½ k pₛ² sin 2α, k = (I_yaw − I_roll)/I_pitch (NASA TP-1689), which no surface removes. A capped roll rate was rejected.
+  Instead the governor shapes the pitch and roll commands together (Ye et al. 2015: a predictive governor on
+  stability-axis rolls beats a static limiter), with the coupling in its prediction. The trade between roll and pull
+  comes out of the cost each tick.
+- **Allocation moved to stability axes,** so "keep the sideslip, give up roll" holds at every AoA. Rolling-pull
+  sideslip on the Ifrit went from 35 to about 6 deg.
+- **Tried and taken out: a lateral (sideslip) prediction.** It used plate-derived Lp, Np, Lr, Nr, Lβ, Nβ, Yβ (all with
+  sensible signs on all ten jets) and a sideslip limit, aiming to replace the 180 deg/s roll cap. Its sideslip
+  predictions ran 5–8 deg off at the stock 286 deg/s Ifrit roll. Acting on them, the governor swung its commands
+  and upset the Vortex and Revoker. Move suppression steadied it but cost pushes their g. So the roll cap stays for now.
+  The next attempt needs the lateral model checked against flight logs first.
+- Known: with a deliberate extra tick of delay, the Revoker at 110 m/s still overshoots its AoA limit by 4.7 deg (under
+  its lift peak). The game's timing has no such tick (phase 1). Solve cost: up to ~200 simulations of 90 ticks, only on
+  ticks where the pilot's command would break a limit. To be timed in phase 7.
 
 Bench: a rigid-body simulator built on the effector models and each jet's export. It adds deliberate model
 error, delay, servo lag and part flex, because a plant that matches the model exactly makes everything look

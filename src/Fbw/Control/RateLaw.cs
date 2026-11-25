@@ -3,22 +3,23 @@ using System;
 namespace AutopilotMod.Fbw.Control
 {
     /// <summary>
-    /// Phase-3 control law: the stick commands body rates (aerospace axes, rad/s).
-    /// - Pitch: pitch rate, at most <see cref="QMax"/> and the rate of a steady pull at <see cref="NzMax"/> g.
+    /// The control law: the stick commands body rates (aerospace axes, rad/s).
+    /// - Pitch: pitch rate, at most <see cref="QMax"/> and the rate of a steady pull at <see cref="NzMax"/> g. The
+    ///   envelope (<see cref="CommandGovernor"/>) then shapes pitch and roll together to keep AoA and g inside their limits.
     /// - Roll: roll about the flight path at up to <see cref="PMax"/>: body roll p cos α with the yaw p sin α
     ///   that keeps the sideslip out.
     /// - Yaw: pedal yaw rate, plus sideslip feedback and the turn-coordination yaw rate g sin φ cos θ / V.
     /// Commands pass a first-order pre-filter; its rate is the feed-forward for the rate loop.
-    /// No AoA protection yet (phase 4). Stick signs are the game's: +pitch = nose down, +roll = right, +yaw = right.
+    /// Stick signs are the game's: +pitch = nose down, +roll = right, +yaw = right.
     /// </summary>
     internal sealed class RateLaw
     {
         private const float G = 9.81f;
 
         /// <summary>
-        /// Phase-3 roll-rate cap (rad/s, 180 deg/s, the Revoker's stock rate). Stock commands half its max roll rate
+        /// Roll-rate cap (rad/s, 180 deg/s, the Revoker's stock rate). Stock commands half its max roll rate
         /// whatever the jet can coordinate (286 deg/s on the Ifrit, whose yaw can't follow that: 10 deg of sideslip on
-        /// the bench). Phase 4 replaces this with the capacity governor.
+        /// the bench). Phase 5 replaces this with a limit from the yaw capacity.
         /// </summary>
         public const float RollCap = 3.1416f;
 
@@ -47,11 +48,16 @@ namespace AutopilotMod.Fbw.Control
         /// measured rate, never past it. (Applying it a tick later, inside the command model's rate, was tried:
         /// the delayed feedback oscillated every other tick.)
         /// </summary>
-        public void Hedge(float pShort, float qShort, float rShort, float p, float q, float r, float dt)
+        /// Roll and yaw are hedged in stability axes (shortfalls in those axes too), so a roll the yaw can't coordinate
+        /// is slowed as a whole, body roll and its yaw together.
+        public void Hedge(float pShort, float qShort, float rShort, float p, float q, float r, float alpha, float dt)
         {
-            P = Toward(P, p, pShort * dt);
+            float ca = (float)Math.Cos(alpha), sa = (float)Math.Sin(alpha);
+            float ps = Toward(P * ca + R * sa, p * ca + r * sa, pShort * dt);
+            float rs = Toward(R * ca - P * sa, r * ca - p * sa, rShort * dt);
+            P = ps * ca - rs * sa;
+            R = ps * sa + rs * ca;
             Q = Toward(Q, q, qShort * dt);
-            R = Toward(R, r, rShort * dt);
         }
 
         // move cmd by -shortfall (the direction the shortfall points), but not past the measured rate
@@ -62,16 +68,35 @@ namespace AutopilotMod.Fbw.Control
             return Math.Abs(next - measured) < Math.Abs(cmd - measured) ? next : cmd;
         }
 
-        public void Step(float stickPitch, float stickRoll, float stickYaw, float speed, float alpha, float beta, float bank, float pitch, float dt)
+        /// <summary>
+        /// The full-stick pitch rate (rad/s): the rate of a steady pull at <see cref="NzMax"/> g, at most <see cref="QMax"/>.
+        /// With Stability Assist off, <see cref="QMax"/> at every speed (stock does the same below 1.2 x corner dynamic pressure).
+        /// </summary>
+        public float FullStickPitch(float speed, bool assist) => assist ? Math.Min(QMax, NzMax * G / Math.Max(speed, 30f)) : QMax;
+
+        /// <summary>
+        /// The stick's targets (rad/s), before the envelope: roll about the flight path <paramref name="psT"/>, pitch rate
+        /// <paramref name="qT"/>, and the yaw rate of the pedal, sideslip feedback and turn coordination <paramref name="rYaw"/>.
+        /// </summary>
+        public void Targets(float stickPitch, float stickRoll, float stickYaw, float speed, float beta, float bank, float pitch, bool assist,
+                            out float psT, out float qT, out float rYaw)
         {
             float v = Math.Max(speed, 30f);
-            float qLim = Math.Min(QMax, NzMax * G / v);
-            float qT = -stickPitch * qLim;
-            float ps = stickRoll * PMax;
-            float ca = (float)Math.Cos(alpha), sa = (float)Math.Sin(alpha);
-            float pT = ps * ca;
-            float rT = ps * sa + stickYaw * RMax + KBeta * beta + G * (float)(Math.Sin(bank) * Math.Cos(pitch)) / v;
+            qT = -stickPitch * FullStickPitch(speed, assist);
+            psT = stickRoll * PMax;
+            rYaw = stickYaw * RMax + KBeta * beta + G * (float)(Math.Sin(bank) * Math.Cos(pitch)) / v;
+        }
 
+        /// <summary>Body-rate targets from a stability-axis roll <paramref name="ps"/>: p = pₛ cos α, r = pₛ sin α + <paramref name="rYaw"/>.</summary>
+        public static void Body(float ps, float rYaw, float alpha, out float pT, out float rT)
+        {
+            pT = ps * (float)Math.Cos(alpha);
+            rT = ps * (float)Math.Sin(alpha) + rYaw;
+        }
+
+        /// <summary>The pre-filter: the commands move toward the targets; their rates are the rate loop's feed-forward.</summary>
+        public void Filter(float pT, float qT, float rT, float dt)
+        {
             float k = dt / (Tau + dt);
             PDot = (pT - P) * k / dt;
             QDot = (qT - Q) * k / dt;

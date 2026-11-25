@@ -56,12 +56,15 @@ internal sealed class FbwBench
     private readonly MassProps mass = new MassProps(); // body frame, about the CG
     private readonly float[] lift, drag;
     private readonly FoilPeaks peaks;
-    public readonly float GLimit, QMax, PMax;
+    public readonly float GLimit, QMax, PMax, StockAlphaLimit;
+    public readonly LiftCurve Curve;
+    public bool Assist = true; // Stability Assist
 
     // plant state (world translation, body rotation)
     private V3 vel, omega; // omega in body axes (Unity)
     private Q4 rot;
     private V3 omegaDot;   // measured over the last step, body axes
+    private float nz = 1f; // load factor over the last step (g along body up, gravity removed)
 
     // plant vs model
     public float EffectScale = 1f;
@@ -177,6 +180,8 @@ internal sealed class FbwBench
         GLimit = F(cf, "flyByWire.gLimitPositive");
         QMax = F(cf, "flyByWire.maxPitchAngularVel");
         PMax = 0.5f * F(cf, "flyByWire.maxRollAngularVel"); // what stock's roll schedule always gives (PHASE0_FACTS 2)
+        StockAlphaLimit = F(cf, "flyByWire.alphaLimiter");
+        Curve = new LiftCurve(parts.Count);
     }
 
     /// <summary>The export recorded each surface's deflection, so the bench's neutral is the real one.</summary>
@@ -210,6 +215,29 @@ internal sealed class FbwBench
         Fc.Engage(State());
     }
 
+    /// <summary>The airframe's AoA limits and lift peaks at the current flight (deg), as the envelope finds them.</summary>
+    public (float max, float min, float peakPos, float peakNeg) Limits()
+    {
+        FillCurve(rot.Inverse * vel, State().Alpha);
+        const float D = 57.29578f;
+        return (Curve.AlphaMax * D, Curve.AlphaMin * D, Curve.PeakPos * D, Curve.PeakNeg * D);
+    }
+
+    // the envelope's airframe numbers, from the same plates (body frame here)
+    private void FillCurve(V3 vb, float alpha)
+    {
+        Curve.Count = 0;
+        foreach (Part p in parts)
+        {
+            int i = Curve.Count++;
+            Curve.Parts[i] = Input(p, vb, p.Surface != null ? p.Surface.Angle : 0f);
+            Curve.Deflection[i] = p.Surface != null ? p.Surface.Angle : 0f;
+            Curve.Hinge[i] = p.Surface != null ? p.Surface.Hinge : V3.Zero;
+            Curve.Arm[i] = p.Com - mass.Cg;
+        }
+        Curve.Update(alpha, vb, new V3(1f, 0f, 0f), new V3(0f, 1f, 0f), mass.Mass * G, lift, drag);
+    }
+
     private void SetFlight(float speed, float alpha)
     {
         rot = Q4.AngleAxis(-alpha * 57.29578f, new V3(1f, 0f, 0f)); // nose up by alpha
@@ -230,7 +258,7 @@ internal sealed class FbwBench
             P = AirData.P(omega.Z), Q = AirData.Q(omega.X), R = AirData.R(omega.Y),
             PDot = AirData.P(wd.Z), QDot = AirData.Q(wd.X), RDot = AirData.R(wd.Y),
             Speed = vel.Magnitude, Alpha = AirData.Alpha(vb.X, vb.Y, vb.Z), Beta = AirData.Beta(vb.X, vb.Y, vb.Z),
-            Bank = bank, Pitch = pitch,
+            Bank = bank, Pitch = pitch, Nz = nz,
         };
     }
 
@@ -251,6 +279,13 @@ internal sealed class FbwBench
     private void Controller(in FlightState s)
     {
         V3 vb = rot.Inverse * vel, cg = mass.Cg;
+        FillCurve(vb, s.Alpha);
+        Fc.LiftSlope = Curve.Slope;
+        Fc.PitchStiffness = Body(MassProps.Solve(mass.Inertia, Curve.MomentSlope)).Y;
+        Fc.CouplingGain = (float)((mass.Inertia[4] - mass.Inertia[8]) / mass.Inertia[0]); // body frame: x pitch, y yaw, z roll
+        Fc.AlphaMax = Curve.AlphaMax;
+        Fc.AlphaMin = Curve.AlphaMin;
+        Fc.Assist = Assist;
         for (int j = 0; j < surfaces.Count; j++)
         {
             Surface sf = surfaces[j];
@@ -258,7 +293,8 @@ internal sealed class FbwBench
             ChannelMix.Reach(sf.Range, sf.Cur, sf.Servo, Dt * FlightComputer.ReachTicks, out float rLo, out float rHi);
             Plate.Input input = Input(sf.Part, vb, sf.Angle);
             Effectiveness.AttachedRange(input, sf.Hinge, sf.Angle, peaks, 1f, out float aLo, out float aHi);
-            Fc.SetBox(j, rLo, rHi, aLo, aHi);
+            float travel = Math.Abs(sf.Range[0]) + Math.Abs(sf.Range[1]) + Math.Abs(sf.Range[2]);
+            Fc.SetBox(j, rLo, rHi, Math.Max(aLo, -travel), Math.Min(aHi, travel));
             V3 m = Effectiveness.Surface(input, sf.Hinge, sf.Part.Com - cg, lift, drag);
             V3 acc = Body(MassProps.Solve(mass.Inertia, m));
             Fc.SetEffect(j, sf.PitchRole ? acc : new V3(acc.X, 0f, acc.Z));
@@ -284,8 +320,7 @@ internal sealed class FbwBench
             if (on && n.VecX > 0f)
             {
                 Fc.Position[jx] = n.Ax;
-                Fc.ReachLo[jx] = Math.Max(-n.VecX, n.Ax - step);
-                Fc.ReachHi[jx] = Math.Min(n.VecX, n.Ax + step);
+                Fc.SetBox(jx, n.Ax - step, n.Ax + step, -n.VecX, n.VecX);
                 Fc.SetEffect(jx, Body(MassProps.Solve(mass.Inertia, Effectiveness.Nozzle(n.PitchAxis, fwd, n.Thrust, arm))));
                 Fc.CostScale[jx] = 10f;
             }
@@ -293,8 +328,7 @@ internal sealed class FbwBench
             if (on && n.VecY > 0f)
             {
                 Fc.Position[jy] = n.Ay;
-                Fc.ReachLo[jy] = Math.Max(-n.VecY, n.Ay - step);
-                Fc.ReachHi[jy] = Math.Min(n.VecY, n.Ay + step);
+                Fc.SetBox(jy, n.Ay - step, n.Ay + step, -n.VecY, n.VecY);
                 Fc.SetEffect(jy, Body(MassProps.Solve(mass.Inertia, Effectiveness.Nozzle(n.YawAxis, fwd, n.Thrust, arm))));
                 Fc.CostScale[jy] = 10f;
             }
@@ -347,6 +381,7 @@ internal sealed class FbwBench
         vel += acc * Dt;
         omega += wd * Dt;
         omegaDot = wd;
+        nz = V3.Dot(rot.Inverse * fWorld, new V3(0f, 1f, 0f)) / (mass.Mass * G);
         V3 ww = rot * omega;
         float wm = ww.Magnitude;
         if (wm > 1e-9f) rot = Normalize(Q4.AngleAxis(wm * Dt * 57.29578f, ww / wm) * rot);

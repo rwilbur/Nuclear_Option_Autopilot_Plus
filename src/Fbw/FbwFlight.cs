@@ -33,6 +33,8 @@ namespace AutopilotMod.Fbw
         private readonly List<SurfaceLink> passive = new List<SurfaceLink>();  // flaps and the like: stock behaviour
         private readonly List<EngineLink> vectoring = new List<EngineLink>();  // two slots each, from NozzleBase
         private readonly float[] range = new float[3], current = new float[3], inputs = new float[3];
+        private readonly LiftCurve curve;                                       // the envelope's airframe numbers
+        private readonly Dictionary<AeroPart, SurfaceLink> surfaceOf = new Dictionary<AeroPart, SurfaceLink>();
 
         public readonly FlightComputer Computer;
 
@@ -59,6 +61,9 @@ namespace AutopilotMod.Fbw
                 if ((v.x > 0f || v.y > 0f) && e.VectoringTransform != null) vectoring.Add(e);
             }
             Computer = new FlightComputer(NozzleBase + 2 * vectoring.Count);
+            curve = new LiftCurve(link.AeroParts.Count);
+            foreach (SurfaceLink s in link.Surfaces)
+                if (s.Part != null && s.Hinge != null) surfaceOf[s.Part] = s;
             for (int k = 0; k < splits.Count; k++) Computer.CostScale[surfaces.Count + k] = 3f; // drag costs speed: closed when not needed
             for (int k = 0; k < vectoring.Count; k++)
             {
@@ -86,7 +91,7 @@ namespace AutopilotMod.Fbw
             return new FlightState
             {
                 P = s.P, Q = s.Q, R = s.R, PDot = s.PDot, QDot = s.QDot, RDot = s.RDot,
-                Speed = s.Speed, Alpha = s.Alpha, Beta = s.Beta, Bank = bank, Pitch = pitch,
+                Speed = s.Speed, Alpha = s.Alpha, Beta = s.Beta, Bank = bank, Pitch = pitch, Nz = s.Nz,
             };
         }
 
@@ -98,6 +103,7 @@ namespace AutopilotMod.Fbw
             MassProps mass = link.Mass;
             V3 cg = mass.Cg;
             GameAero aero = link.Aero;
+            Envelope(state, rot, mass, cg, aero);
 
             for (int j = 0; j < surfaces.Count; j++)
             {
@@ -125,7 +131,8 @@ namespace AutopilotMod.Fbw
                 fc.Position[j] = angle;
                 ChannelMix.Reach(range, current, s.Servo, dt * FlightComputer.ReachTicks, out float rLo, out float rHi);
                 Effectiveness.AttachedRange(input, hinge, angle, aero.Peaks, 1f, out float aLo, out float aHi);
-                fc.SetBox(j, rLo, rHi, aLo, aHi);
+                float travel = Math.Abs(range[0]) + Math.Abs(range[1]) + Math.Abs(range[2]);
+                fc.SetBox(j, rLo, rHi, Math.Max(aLo, -travel), Math.Min(aHi, travel));
             }
 
             // split surfaces: drag on one side, yaw. At idle throttle the game opens them all (the airbrake): left to stock then.
@@ -178,6 +185,40 @@ namespace AutopilotMod.Fbw
             fc.Step(pilot.pitch, pilot.roll, pilot.yaw, State(state), dt);
             Write(pilot, idle);
         }
+
+        /// <summary>
+        /// The envelope's inputs: the airframe's lift slope, AoA limits and pitch stiffness from every aero part's plate at the live
+        /// flow (<see cref="LiftCurve"/>), the inertia-coupling gain from the live inertia, and Stability Assist.
+        /// </summary>
+        private void Envelope(in AirframeState state, Q4 rot, MassProps mass, V3 cg, GameAero aero)
+        {
+            curve.Count = 0;
+            foreach (AeroPart p in link.AeroParts)
+            {
+                if (!aero.LiveInput(p, out Plate.Input input)) continue;
+                int i = curve.Count++;
+                curve.Parts[i] = input;
+                curve.Arm[i] = GameAero.V(p.rb.worldCenterOfMass) - cg;
+                bool moves = surfaceOf.TryGetValue(p, out SurfaceLink s) && s.JobReady;
+                curve.Deflection[i] = moves ? s.Angle : 0f;
+                curve.Hinge[i] = moves ? GameAero.V(s.Hinge.right) : V3.Zero;
+            }
+            V3 right = rot * new V3(1f, 0f, 0f), up = rot * new V3(0f, 1f, 0f), fwd = rot * new V3(0f, 0f, 1f);
+            curve.Update(state.Alpha, GameAero.V(state.VCg), right, up, mass.Mass * 9.81f, aero.Lift, aero.Drag);
+
+            FlightComputer fc = Computer;
+            fc.LiftSlope = curve.Known ? curve.Slope : 0f;
+            fc.AlphaMax = curve.AlphaMax;
+            fc.AlphaMin = curve.AlphaMin;
+            fc.PitchStiffness = FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, curve.MomentSlope)).Y;
+            float iPitch = V3.Dot(right, MassProps.Mul(mass.Inertia, right)), iYaw = V3.Dot(up, MassProps.Mul(mass.Inertia, up));
+            float iRoll = V3.Dot(fwd, MassProps.Mul(mass.Inertia, fwd));
+            fc.CouplingGain = iPitch > 0f ? (iYaw - iRoll) / iPitch : 0f;
+            fc.Assist = link.Aircraft.flightAssist;
+        }
+
+        /// <summary>The envelope's airframe numbers, for the logs and the display.</summary>
+        public LiftCurve Curve => curve;
 
         private static void Nozzle(FlightComputer fc, int j, bool on, float now, float limit, float step, V3 moment, MassProps mass, Q4 rot)
         {

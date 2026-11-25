@@ -592,7 +592,8 @@ internal static class SelfCheck
                 Check(slow.PErr < (c.name == "model" ? 0.1f : 0.2f), $"bench {jet} {c.name}: a half-stick roll at 90 m/s follows the command ({100 * slow.PErr:F0}% off)");
                 // pass marks: what the 25 Nov tuning shows, with room. Noise and delay are allowed more surface dither.
                 bool nominal = c.name == "model";
-                float chatterMax = c.noise > 0f ? 8f : c.delay > 0 ? 12f : nominal ? 3f : 6f; // Revoker canards + nozzle: 2-5
+                // Revoker canards + nozzle: 2-5; nominal 3.07 since allocation moved to stability axes (25 Nov), the other jets 0-0.5
+                float chatterMax = c.noise > 0f ? 8f : c.delay > 0 ? 12f : nominal ? 3.5f : 6f;
                 Check(hold.RateRms < (nominal ? 0.5f : 2f), $"bench {jet} {c.name}: hands-off holds the rates ({hold.RateRms:F2} deg/s rms)");
                 Check(pull.QErr < (nominal ? 0.06f : 0.12f), $"bench {jet} {c.name}: pitch rate follows the command ({100 * pull.QErr:F0}% off)");
                 Check(pull.QOver < 0.2f, $"bench {jet} {c.name}: no large pitch overshoot ({100 * pull.QOver:F0}%)");
@@ -601,11 +602,54 @@ internal static class SelfCheck
                 Check(chatter < chatterMax, $"bench {jet} {c.name}: surfaces don't chatter ({chatter:F2} reversals per surface per second)");
             }
         }
+        CheckFbwEnvelope(dir, jets, cases);
+    }
+
+    /// <summary>
+    /// Phase 4: full-stick pulls (g-limited fast, AoA-limited slow), a rolling pull, a release and a push stay inside the
+    /// envelope on every jet, on and off model. Also lists every exported jet's AoA limits against stock's.
+    /// </summary>
+    private static void CheckFbwEnvelope(string dir, string[] jets, (string name, float scale, int delay, float noise)[] cases)
+    {
+        foreach (string file in System.IO.Directory.GetFiles(dir, "*.json").OrderBy(x => x))
+        {
+            var b = new FbwBench(file);
+            b.Start(150f);
+            var (max, min, pPos, pNeg) = b.Limits();
+            Console.WriteLine($"envelope {b.Unit,-15} AoA limits {max:F0} / {min:F0} deg (lift peaks {pPos:F0} / {pNeg:F0}; stock limiter {b.StockAlphaLimit:F0})");
+        }
+        foreach (string jet in jets)
+        {
+            string path = System.IO.Path.Combine(dir, jet + ".json");
+            if (!System.IO.File.Exists(path)) continue;
+            foreach (var c in cases)
+            {
+                var runs = new (string name, BenchResult r)[]
+                {
+                    ("pull 200", Fly(path, c.scale, c.delay, c.noise, 4f, t => (t > 0.2f ? -1f : 0f, 0f, 0f))),
+                    ("pull 110", Fly(path, c.scale, c.delay, c.noise, 4f, t => (t > 0.2f ? -1f : 0f, 0f, 0f), 110f)),
+                    ("roll+pull 150", Fly(path, c.scale, c.delay, c.noise, 3f, t => (t > 0.2f ? -1f : 0f, t > 0.2f ? 1f : 0f, 0f), 150f)),
+                    ("release 150", Fly(path, c.scale, c.delay, c.noise, 4f, t => (t > 0.2f && t < 2f ? -1f : 0f, 0f, 0f), 150f)),
+                    ("push 200", Fly(path, c.scale, c.delay, c.noise, 3f, t => (t > 0.2f ? 1f : 0f, 0f, 0f))),
+                };
+                // off model, the prediction runs a little behind: an extra tick of delay at 110 m/s takes the Revoker, whose nose needs
+                // a second to stop there, 4.7 deg past its limit (still under its lift peak). The game's timing is exact (phase 1).
+                float aoaOver = c.name == "model" ? 1f : 5f;
+                foreach (var (name, r) in runs)
+                {
+                    Console.WriteLine($"envelope {jet,-15} {c.name,-9} {name,-13} AoA {r.AlphaLo:F1}..{r.AlphaHi:F1} (limits {r.AlphaMin:F1}..{r.AlphaMax:F1}) nz {r.NzLo:F2}..{r.NzHi:F2} (limits {r.NzMin:F1}..{r.NzMax:F1}) beta {r.BetaMax:F1} pred err {r.PredErr:F2} deg");
+                    Check(r.AlphaHi < r.AlphaMax + aoaOver && r.AlphaLo > r.AlphaMin - aoaOver, $"envelope {jet} {c.name} {name}: AoA inside its limits ({r.AlphaLo:F1}..{r.AlphaHi:F1}, limits {r.AlphaMin:F1}..{r.AlphaMax:F1})");
+                    Check(r.NzHi < r.NzMax + 0.3f && r.NzLo > r.NzMin - 0.3f, $"envelope {jet} {c.name} {name}: load factor inside its limits ({r.NzLo:F2}..{r.NzHi:F2}, limits {r.NzMin:F1}..{r.NzMax:F1})");
+                }
+            }
+        }
     }
 
     private struct BenchResult
     {
         public float RateRms, QErr, QOver, PErr, BetaMax, QAbsMax, Chatter;
+        public float AlphaHi, AlphaLo, NzHi, NzLo, AlphaMax, AlphaMin, NzMax, NzMin; // deg, g: extremes after the settling, and the limits
+        public float PredErr; // deg rms: the governor's AoA prediction 0.5 s ahead against what happened
     }
 
     /// <summary>
@@ -613,9 +657,9 @@ internal static class SelfCheck
     /// Errors are mean |actual − commanded| over the second half, relative to the command; overshoot past the settled command; chatter =
     /// share of ticks a surface command reverses direction by more than 0.05 deg.
     /// </summary>
-    private static BenchResult Fly(string path, float scale, int delay, float noise, float seconds, Func<float, (float p, float r, float y)> stick, float speed = 200f)
+    private static BenchResult Fly(string path, float scale, int delay, float noise, float seconds, Func<float, (float p, float r, float y)> stick, float speed = 200f, bool assist = true)
     {
-        var b = new FbwBench(path) { EffectScale = scale, Delay = delay, Noise = noise };
+        var b = new FbwBench(path) { EffectScale = scale, Delay = delay, Noise = noise, Assist = assist };
         b.Start(speed);
         // the trim only balances lift and weight: let the FBW settle the start-up pitching moment hands-off first
         for (int k = 0; k < 120; k++) b.Step(0f, 0f, 0f);
@@ -624,7 +668,10 @@ internal static class SelfCheck
         System.IO.StreamWriter trace = tracePath != null && (Environment.GetEnvironmentVariable("FBW_TRACE_JET") ?? "") == b.Unit ? new System.IO.StreamWriter(tracePath, true) : null;
         int n = (int)(seconds * 60f), half = n / 2, rev = 0, steps = 0;
         double rate2 = 0, qe = 0, qc = 0, pe = 0, pc = 0;
-        float qMax = 0f, qAbs = 0f, betaMax = 0f;
+        float qMax = 0f, qAbs = 0f, betaMax = 0f, aHi = -999f, aLo = 999f, nHi = -999f, nLo = 999f;
+        var pred = new float[n];
+        double predE = 0;
+        int predN = 0;
         float[] last = new float[b.Slots], lastD = new float[b.Slots];
         for (int k = 0; k < n; k++)
         {
@@ -641,10 +688,16 @@ internal static class SelfCheck
             qMax = Math.Max(qMax, s.Q);
             qAbs = Math.Max(qAbs, Math.Abs(s.Q) * d);
             betaMax = Math.Max(betaMax, Math.Abs(s.Beta) * d);
+            aHi = Math.Max(aHi, s.Alpha * d); aLo = Math.Min(aLo, s.Alpha * d);
+            nHi = Math.Max(nHi, s.Nz); nLo = Math.Min(nLo, s.Nz);
+            // Govern's step i is the state after i + 1 physics steps, as s is after this tick's one
+            pred[k] = b.Fc.Governor.PredAlpha * d;
+            int from = k - AutopilotMod.Fbw.Control.CommandGovernor.PredictStep;
+            if (from >= 0) { predE += (pred[from] - s.Alpha * d) * (pred[from] - s.Alpha * d); predN++; }
             if (trace != null)
             {
                 var ix = b.Fc.Indi;
-                trace.WriteLine(string.Join(",", new[] { k, s.P * d, s.Q * d, s.R * d, b.Fc.Law.P * d, b.Fc.Law.Q * d, b.Fc.Law.R * d, s.Beta * d, ix.NuRoll * d, ix.NuPitch * d, ix.NuYaw * d, ix.UnmetRoll * d, ix.UnmetPitch * d, ix.UnmetYaw * d, ix.Alloc.Iterations }
+                trace.WriteLine(string.Join(",", new[] { k, s.P * d, s.Q * d, s.R * d, b.Fc.Law.P * d, b.Fc.Law.Q * d, b.Fc.Law.R * d, s.Beta * d, ix.NuRoll * d, ix.NuPitch * d, ix.NuYaw * d, ix.UnmetRoll * d, ix.UnmetPitch * d, ix.UnmetYaw * d, ix.Alloc.Iterations, s.Alpha * d, s.Nz, b.Fc.Governor.Wanted * d, b.Fc.Governor.Governed * d, b.Fc.Governor.PredAlpha * d, b.Fc.AlphaMax * d, b.Fc.LiftSlope, b.Fc.Governor.WantedRoll * d, b.Fc.Governor.GovernedRoll * d }
                     .Select(v => Convert.ToSingle(v).ToString("G4", System.Globalization.CultureInfo.InvariantCulture))
                     .Concat(Enumerable.Range(0, b.Slots).Select(j => b.Fc.Command[j].ToString("G4", System.Globalization.CultureInfo.InvariantCulture)))
                     .Concat(Enumerable.Range(0, b.Slots).Select(j => $"|{b.Fc.Position[j]:F2} [{b.Fc.ReachLo[j]:F2},{b.Fc.ReachHi[j]:F2}] B({ix.Alloc.B[3 * j] * d:F1};{ix.Alloc.B[3 * j + 1] * d:F1};{ix.Alloc.B[3 * j + 2] * d:F1})"))));
@@ -670,12 +723,19 @@ internal static class SelfCheck
             BetaMax = betaMax,
             QAbsMax = qAbs,
             Chatter = steps > 0 ? 60f * rev / steps : 0f, // reversals per surface per second, over 60
+            AlphaHi = aHi, AlphaLo = aLo, NzHi = nHi, NzLo = nLo,
+            AlphaMax = b.Fc.AlphaMax * 57.29578f, AlphaMin = b.Fc.AlphaMin * 57.29578f, NzMax = b.Fc.Governor.NzMax, NzMin = b.Fc.Governor.NzMin,
+            PredErr = predN > 0 ? (float)Math.Sqrt(predE / predN) : 0f,
         };
     }
 
     /// <summary>The FBW's allocator and channel mixing.</summary>
     private static void CheckFbwControl()
     {
+        // the lift curve turns the air about +right by +delta to raise the AoA by delta (left-handed frame)
+        V3 turned = Q4.AngleAxis(5f, new V3(1f, 0f, 0f)) * new V3(0f, 0f, 100f);
+        Check(Near(AutopilotMod.Fbw.AirData.Alpha(turned.X, turned.Y, turned.Z) * 57.29578f, 5f, 1e-3f), "lift curve: turning the air about +right raises the AoA");
+
         // two effectors, roll-only and pitch-only, wide boxes: the exact increments
         var a = new AutopilotMod.Fbw.Control.Allocator(4) { Count = 2 };
         a.B[0] = 2f; a.B[4] = 4f; // effector 0: 2 roll per unit; effector 1: 4 pitch per unit

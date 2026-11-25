@@ -12,8 +12,8 @@ namespace AutopilotMod.Fbw
         /// <summary>Test of the takeover: every surface and engine gets its own inputs, copied from the shared ones exactly when stock would read them. Flies exactly like stock.</summary>
         Passthrough,
         /// <summary>
-        /// The FBW flies (phase 3): rate laws, INDI, every surface and nozzle allocated on its own. In flight above
-        /// <see cref="FbwController.EngageSpeed"/> only; stock below it and on the ground. No AoA/g protection yet.
+        /// The FBW flies: rate laws, the envelope governor (AoA and g), INDI, every surface and nozzle allocated on its own. In flight above
+        /// <see cref="FbwController.EngageSpeed"/> only; stock below it and on the ground.
         /// </summary>
         Full,
     }

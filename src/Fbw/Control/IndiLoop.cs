@@ -13,6 +13,9 @@ namespace AutopilotMod.Fbw.Control
     /// The measured acceleration and the positions pass the same low-pass (the joints between parts make the
     /// measurement vibrate a little), so the increment stays consistent [Smeur 2016].
     ///
+    /// The allocation runs in stability axes: after a step, Alloc.B and the unmet acceleration are in (stability roll,
+    /// pitch, stability yaw), turned from body axes by the AoA.
+    ///
     /// Effectors are fixed slots: an unusable one (shot off, nozzle above its speed limit) gets B = 0 and a
     /// zero-width box, so slots and their filters never shift.
     /// </summary>
@@ -35,10 +38,17 @@ namespace AutopilotMod.Fbw.Control
         public readonly Allocator Alloc;
         public readonly float[] Command; // per slot, the position commanded this tick
         public float NuRoll, NuPitch, NuYaw; // last ν (rad/s²)
-        public float UnmetRoll, UnmetPitch, UnmetYaw; // Δν the effectors could not give (rad/s²)
+        public float UnmetRoll, UnmetPitch, UnmetYaw; // Δν the effectors could not give (rad/s², stability axes)
 
         private readonly float[] uf;
         private float wdP, wdQ, wdR;
+
+        /// <summary>The measured pitch acceleration through the INDI filter (rad/s²), as of the last step.</summary>
+        public float FilteredQDot => wdQ;
+
+        /// <summary>The measured roll and yaw accelerations through the INDI filter (rad/s², body), as of the last step.</summary>
+        public float FilteredPDot => wdP;
+        public float FilteredRDot => wdR;
         private bool started;
 
         public IndiLoop(int slots)
@@ -58,7 +68,7 @@ namespace AutopilotMod.Fbw.Control
         /// <paramref name="position"/>[j] (now), <paramref name="reachLo"/>/<paramref name="reachHi"/>[j] (positions reachable this tick),
         /// <paramref name="neutral"/>[j] and <paramref name="costScale"/>[j] (1 = surface, more = prefer neutral more).
         /// </summary>
-        public void Step(int count, float p, float q, float r, float pDot, float qDot, float rDot,
+        public void Step(int count, float p, float q, float r, float pDot, float qDot, float rDot, float alpha,
                          RateLaw law, float[] position, float[] reachLo, float[] reachHi, float[] neutral, float[] costScale, float dt)
         {
             float k = started ? dt / (FilterTau + dt) : 1f;
@@ -74,6 +84,16 @@ namespace AutopilotMod.Fbw.Control
 
             Allocator a = Alloc;
             a.Count = count;
+            // Allocate in stability axes (roll about the flight path, and the yaw across it that is sideslip): the axis
+            // weights then say "keep the sideslip, give up roll rate" at every AoA. In body axes at high AoA, yaw first meant
+            // a body yaw rate without its matching body roll, which is sideslip (bench rolling pulls: 35 deg on the Ifrit).
+            float ca = (float)Math.Cos(alpha), sa = (float)Math.Sin(alpha);
+            for (int j = 0; j < count; j++)
+            {
+                float bp = a.B[3 * j], br = a.B[3 * j + 2];
+                a.B[3 * j] = bp * ca + br * sa;
+                a.B[3 * j + 2] = br * ca - bp * sa;
+            }
             // An effector that barely acts on every axis right now (near stall, or flow it no longer turns) holds still:
             // the linearisation says little about it and its position would follow round-off. Per axis, against the
             // strongest effector on that axis: a single weighted total let a thrust-vectoring nozzle at low speed (huge
@@ -98,7 +118,8 @@ namespace AutopilotMod.Fbw.Control
                 a.C[j] = Reg * costScale[j] * b2 + 1e-12f;
                 a.D[j] = Damp * b2;
             }
-            float dvP = IncrementGain * (NuRoll - wdP), dvQ = IncrementGain * (NuPitch - wdQ), dvR = IncrementGain * (NuYaw - wdR);
+            float dvB = IncrementGain * (NuRoll - wdP), dvQ = IncrementGain * (NuPitch - wdQ), dvY = IncrementGain * (NuYaw - wdR);
+            float dvP = dvB * ca + dvY * sa, dvR = dvY * ca - dvB * sa;
             a.Solve(dvP, dvQ, dvR);
             a.Achieved(out float gp, out float gq, out float gr);
             UnmetRoll = dvP - gp;
