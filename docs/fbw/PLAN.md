@@ -206,6 +206,10 @@ Choices, and the evidence for them:
   - The coordinate search over the paper's two pitch unknowns (ν and the decaying μ) did not settle: the pitch command
     jumped between ticks, and the roll was sometimes reversed or raised past the pilot's. Now there is one pitch unknown,
     and the roll can only be taken toward zero, never reversed or added to.
+  - Second flights (Vortex, Ifrit): AoA past its limit for 0.15 s at most 0.6 deg (Vortex), never on the Ifrit; nz −3.05..8.8;
+    0.5 s AoA prediction 0.95–1.26 deg rms. The roll was never reversed (an earlier reading of reversals came from taking
+    min/max over whole manoeuvres). The last pitch-command kicks came from the AoA limit stepping by whole degrees under a
+    jet at its limit: the limit is now interpolated between sweep points and moves at most 2 deg/s.
   - Still open: sideslip. A full roll at 89 m/s and 25 deg AoA builds 9 deg with no pedal; on the bench, a Vortex rolling
     pull at 150 m/s builds 23 deg. The governor holds AoA and g only, and the 180 deg/s roll cap stays. The logged rolls are
     the data for validating a lateral model before it is tried again.

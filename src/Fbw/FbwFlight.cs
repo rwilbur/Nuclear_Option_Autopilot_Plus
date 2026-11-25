@@ -103,7 +103,7 @@ namespace AutopilotMod.Fbw
             MassProps mass = link.Mass;
             V3 cg = mass.Cg;
             GameAero aero = link.Aero;
-            Envelope(state, rot, mass, cg, aero);
+            Envelope(state, rot, mass, cg, aero, dt);
 
             for (int j = 0; j < surfaces.Count; j++)
             {
@@ -190,7 +190,7 @@ namespace AutopilotMod.Fbw
         /// The envelope's inputs: the airframe's lift slope, AoA limits and pitch stiffness from every aero part's plate at the live
         /// flow (<see cref="LiftCurve"/>), the inertia-coupling gain from the live inertia, and Stability Assist.
         /// </summary>
-        private void Envelope(in AirframeState state, Q4 rot, MassProps mass, V3 cg, GameAero aero)
+        private void Envelope(in AirframeState state, Q4 rot, MassProps mass, V3 cg, GameAero aero, float dt)
         {
             curve.Count = 0;
             foreach (AeroPart p in link.AeroParts)
@@ -204,7 +204,7 @@ namespace AutopilotMod.Fbw
                 curve.Hinge[i] = moves ? GameAero.V(s.Hinge.right) : V3.Zero;
             }
             V3 right = rot * new V3(1f, 0f, 0f), up = rot * new V3(0f, 1f, 0f), fwd = rot * new V3(0f, 0f, 1f);
-            curve.Update(state.Alpha, GameAero.V(state.VCg), right, up, mass.Mass * 9.81f, aero.Lift, aero.Drag);
+            curve.Update(state.Alpha, GameAero.V(state.VCg), right, up, mass.Mass * 9.81f, aero.Lift, aero.Drag, dt);
 
             FlightComputer fc = Computer;
             fc.LiftSlope = curve.Known ? curve.Slope : 0f;

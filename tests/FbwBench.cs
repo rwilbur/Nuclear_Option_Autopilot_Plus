@@ -235,7 +235,7 @@ internal sealed class FbwBench
             Curve.Hinge[i] = p.Surface != null ? p.Surface.Hinge : V3.Zero;
             Curve.Arm[i] = p.Com - mass.Cg;
         }
-        Curve.Update(alpha, vb, new V3(1f, 0f, 0f), new V3(0f, 1f, 0f), mass.Mass * G, lift, drag);
+        Curve.Update(alpha, vb, new V3(1f, 0f, 0f), new V3(0f, 1f, 0f), mass.Mass * G, lift, drag, Dt);
     }
 
     private void SetFlight(float speed, float alpha)

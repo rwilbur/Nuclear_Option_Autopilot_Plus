@@ -53,6 +53,8 @@ namespace AutopilotMod.Fbw.Control
         private readonly float[] sweep = new float[(int)(SweepHi - SweepLo) + 1];
         private readonly Plate.Input[] clean;
         private int sinceSweep;
+        private float maxTarget, minTarget;   // the limits from the latest sweep (rad)
+        private const float LimitRate = 2f;   // deg/s the limits may move: slower than the governor's horizon
         private float[] liftChart, dragChart; // the game's airfoil charts, as of the last update
 
         public LiftCurve(int capacity)
@@ -68,7 +70,7 @@ namespace AutopilotMod.Fbw.Control
         /// <paramref name="alpha"/>: the body AoA now (rad). <paramref name="flow"/>: the air velocity at the CG; <paramref name="right"/>,
         /// <paramref name="up"/>: the body's lateral and up axes; all in the frame of the parts' inputs. <paramref name="weight"/>: m g (N).
         /// </summary>
-        public void Update(float alpha, V3 flow, V3 right, V3 up, float weight, float[] lift, float[] drag)
+        public void Update(float alpha, V3 flow, V3 right, V3 up, float weight, float[] lift, float[] drag, float dt)
         {
             if (Count == 0 || !(weight > 0f) || !(flow.SqrMagnitude > 0f)) return;
             liftChart = lift;
@@ -77,6 +79,14 @@ namespace AutopilotMod.Fbw.Control
             float nDown = Load(Parts, -SlopeStep, flow, right, up, out _, out V3 mDown);
             Slope = (nUp - nDown) / (2f * SlopeStep * Deg2Rad * weight);
             MomentSlope = (mUp - mDown) / (2f * SlopeStep * Deg2Rad);
+            if (Known)
+            {
+                // the limits move toward the latest sweep at LimitRate: a step under a jet sitting at its limit made the governor
+                // kick the nose down for a tick (Vortex log, 25 Nov: 32 -> 31 deg)
+                float step = LimitRate * Deg2Rad * dt;
+                AlphaMax += Math.Max(-step, Math.Min(step, maxTarget - AlphaMax));
+                AlphaMin += Math.Max(-step, Math.Min(step, minTarget - AlphaMin));
+            }
             if (Known && ++sinceSweep < SweepEvery) return;
             sinceSweep = 0;
 
@@ -97,10 +107,20 @@ namespace AutopilotMod.Fbw.Control
                 if (k <= i0 && l < worst) { worst = l; iNeg = k; }
             }
             int hi = iPos, lo = iNeg;
-            while (hi > i0 && sweep[hi - 1] >= LiftShare * best) hi--;
-            while (lo < i0 && sweep[lo + 1] <= LiftShare * worst) lo++;
-            AlphaMax = (SweepLo + hi) * Deg2Rad;
-            AlphaMin = (SweepLo + lo) * Deg2Rad;
+            float top = LiftShare * best, bottom = LiftShare * worst;
+            while (hi > i0 && sweep[hi - 1] >= top) hi--;
+            while (lo < i0 && sweep[lo + 1] <= bottom) lo++;
+            // where the curve crosses the share, between the sweep's 1-deg points
+            float aHi = SweepLo + hi, aLo = SweepLo + lo;
+            if (hi > i0 && sweep[hi] > sweep[hi - 1]) aHi -= (sweep[hi] - top) / (sweep[hi] - sweep[hi - 1]);
+            if (lo < i0 && sweep[lo] < sweep[lo + 1]) aLo += (bottom - sweep[lo]) / (sweep[lo + 1] - sweep[lo]);
+            maxTarget = aHi * Deg2Rad;
+            minTarget = aLo * Deg2Rad;
+            if (!Known)
+            {
+                AlphaMax = maxTarget;
+                AlphaMin = minTarget;
+            }
             PeakPos = (SweepLo + iPos) * Deg2Rad;
             PeakNeg = (SweepLo + iNeg) * Deg2Rad;
             Known = true;
