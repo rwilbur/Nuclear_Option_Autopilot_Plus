@@ -57,6 +57,13 @@ namespace AutopilotMod.Fbw
             foreach (EngineLink e in Engines) e.Hold();
         }
 
+        public bool Owns(MonoBehaviour engine)
+        {
+            foreach (EngineLink e in Engines)
+                if (e.Is(engine)) return true;
+            return false;
+        }
+
         /// <summary>Hand every surface and engine back to the shared inputs.</summary>
         public void Release()
         {

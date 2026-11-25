@@ -27,6 +27,25 @@ namespace AutopilotMod
         private static void Prefix() => Fbw.FbwController.Current?.PreJobs();
     }
 
+    /// <summary>The aero job's forces are applied; the physics step comes after the MonoBehaviours' FixedUpdate.</summary>
+    [HarmonyPatch(typeof(NuclearOption.Jobs.JobManager), "FixedUpdateLate")]
+    internal static class FbwAfterAeroPatch
+    {
+        private static void Postfix() => Fbw.FbwController.Current?.AfterAero();
+    }
+
+    [HarmonyPatch(typeof(Turbojet), "FixedUpdate")]
+    internal static class FbwAfterTurbojetPatch
+    {
+        private static void Postfix(Turbojet __instance) => Fbw.FbwController.Current?.AfterEngine(__instance);
+    }
+
+    [HarmonyPatch(typeof(Turbofan), "FixedUpdate")]
+    internal static class FbwAfterTurbofanPatch
+    {
+        private static void Postfix(Turbofan __instance) => Fbw.FbwController.Current?.AfterEngine(__instance);
+    }
+
     /// <summary>After the pilot's inputs are filtered, before the engines' FixedUpdate reads them.</summary>
     [HarmonyPatch(typeof(Aircraft), nameof(Aircraft.FilterInputs))]
     internal static class FbwAfterFilterPatch

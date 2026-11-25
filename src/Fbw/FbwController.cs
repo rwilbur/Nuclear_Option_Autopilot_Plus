@@ -32,6 +32,7 @@ namespace AutopilotMod.Fbw
 
         private AircraftLink link;
         private FbwTelemetry tlm;
+        private AeroCheck check; // phase-2 diagnostics, with telemetry
         private Aircraft failed; // the aircraft the FBW faulted on: stays stock until it is replaced
 
         public FbwController(ConfigEntry<FbwMode> mode, ConfigEntry<bool> telemetry, ManualLogSource log)
@@ -68,7 +69,8 @@ namespace AutopilotMod.Fbw
                 if (telemetry.Value)
                 {
                     tlm ??= new FbwTelemetry(link);
-                    tlm.Row(link, state, hold);
+                    check ??= new AeroCheck(link);
+                    tlm.Row(link, state, hold, check);
                 }
                 else CloseTelemetry();
             }
@@ -94,6 +96,22 @@ namespace AutopilotMod.Fbw
             {
                 Fail(e);
             }
+        }
+
+        /// <summary>JobManager.FixedUpdateLate: the aero job's forces are in, the physics step is next.</summary>
+        public void AfterAero()
+        {
+            if (check == null) return;
+            try { check.AfterAero(); }
+            catch (Exception e) { Fail(e); }
+        }
+
+        /// <summary>After a Turbojet's or Turbofan's FixedUpdate: its thrust for this tick is applied.</summary>
+        public void AfterEngine(MonoBehaviour engine)
+        {
+            if (check == null || !link.Owns(engine)) return;
+            try { check.AfterEngine(engine); }
+            catch (Exception e) { Fail(e); }
         }
 
         /// <summary>Plugin unload: hand everything back.</summary>
@@ -122,6 +140,7 @@ namespace AutopilotMod.Fbw
 
         private void CloseTelemetry()
         {
+            check = null;
             if (tlm == null) return;
             log.LogInfo("FBW telemetry: " + tlm.Path);
             tlm.Dispose();

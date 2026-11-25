@@ -1,5 +1,6 @@
 using System;
 using AutopilotMod;
+using AutopilotMod.Fbw.Model;
 
 /// <summary>
 /// Assert-based checks of src/ApMath.cs, plus small offline models of the helicopter height loop
@@ -287,6 +288,7 @@ internal static class SelfCheck
             Check(AutopilotMod.Fbw.AirData.Q(0.5f) == -0.5f && AutopilotMod.Fbw.AirData.P(0.5f) == -0.5f && AutopilotMod.Fbw.AirData.R(0.5f) == 0.5f,
                 "body rates: nose-up q, right-roll p, nose-right r");
         }
+        CheckFbwModel();
 
         Console.WriteLine(failures == 0 ? "Self-check passed." : $"{failures} check(s) failed.");
         return failures == 0 ? 0 : 1;
@@ -500,6 +502,59 @@ internal static class SelfCheck
             if (leg == 2) over = Math.Max(over, (hdg - a) * 180f / (float)Math.PI);
         }
         return over;
+    }
+
+    /// <summary>The FBW's mirror of the game's aero plate, and the rigid-body mass properties.</summary>
+    private static void CheckFbwModel()
+    {
+        // plate on the game's built-in curve (foil -1): CL = 1.8 sin 5a, CD = 1.5 (1 - cos 2a) + 0.02
+        var p = new Plate.Input { LiftRot = Q4.Identity, Foil = -1, Area = 2f, DragArea = 0f, Eff = 1f, Rho = 1.225f, SpeedOfSound = 340f };
+        double aoa = 4.0 * Math.PI / 180.0; // nose 4 deg above the flight path: the part moves forward and down in its own frame
+        p.VAir = new V3(0f, -(float)Math.Sin(aoa) * 150f, (float)Math.Cos(aoa) * 150f);
+        V3 f = Plate.Force(p, null, null, out float alpha);
+        float q = 0.5f * 1.225f * 150f * 150f;
+        float cl = 1.8f * (float)Math.Sin(5.0 * aoa), cd = 1.5f * (1f - (float)Math.Cos(2.0 * aoa)) + 0.02f;
+        V3 along = p.VAir.Normalized;
+        float dragN = -V3.Dot(f, along), liftN = (f - along * V3.Dot(f, along)).Magnitude;
+        Check(Near(alpha * 57.29578f, -4f), $"plate: the game's local AoA is minus the nose-up angle ({alpha * 57.29578f:F2})");
+        Check(Near(liftN, cl * q * 2f, 1f) && f.Y > 0f, $"plate: lift CL q S, upward for nose-up ({liftN:F0} N vs {cl * q * 2f:F0})");
+        Check(Near(dragN, cd * q * 2f, 0.5f), $"plate: drag CD q S along the flow ({dragN:F1} N vs {cd * q * 2f:F1})");
+        p.Eff = 0f;
+        p.DragArea = 0.3f;
+        f = Plate.Force(p, null, null, out _);
+        Check(Near(-V3.Dot(f, along), 0.5f * q * (0.3f + 0.3f + 0.2f), 0.5f), "plate: a dead part is only parasitic drag");
+        Check(Plate.Force(new Plate.Input { LiftRot = Q4.Identity }, null, null, out _).SqrMagnitude == 0f, "plate: no air, no force");
+
+        // charts: linear between points, clamped at the ends (ChartHelper.SafeRead)
+        var chart = new float[Plate.ChartPoints * 2];
+        for (int i = 0; i < Plate.ChartPoints; i++) chart[Plate.ChartPoints + i] = i; // foil 1 = the index itself
+        Check(Near(Plate.Read(chart, Plate.ChartPoints, 63.25f), 63.25f) && Plate.Read(chart, Plate.ChartPoints, -5f) == 0f && Plate.Read(chart, Plate.ChartPoints, 500f) == 127f,
+            "chart read: linear, clamped");
+        Plate.Coefficients(chart, chart, 1, 0f, out float cl0, out _);
+        Check(cl0 == 64f, "chart: zero AoA reads the middle point");
+
+        V3 turned = Plate.RotateTowards(new V3(0f, 0f, 10f), new V3(0f, 1f, 0f), 0.1f);
+        Check(Near(turned.Magnitude, 10f) && Near((float)Math.Atan2(turned.Y, turned.Z), 0.1f), "flow channeling turns by at most the limit, keeps the speed");
+
+        // mass properties: two 1 kg bodies at x = +-1 with unit principal inertia -> diag(2, 4, 4), CG at 0
+        var mp = new MassProps();
+        mp.Add(1f, new V3(101f, 50f, -7f), new V3(1f, 1f, 1f), Q4.Identity);
+        mp.Add(1f, new V3(99f, 50f, -7f), new V3(1f, 1f, 1f), Q4.Identity);
+        mp.Finish();
+        Check(Near(mp.Mass, 2f) && Near(mp.Cg.X, 100f) && Near(mp.Cg.Y, 50f), "mass props: mass and CG");
+        Check(Near((float)mp.Inertia[0], 2f) && Near((float)mp.Inertia[4], 4f) && Near((float)mp.Inertia[8], 4f) && Math.Abs(mp.Inertia[1]) < 1e-6,
+            $"mass props: parallel axis about the CG ({mp.Inertia[0]:F3}, {mp.Inertia[4]:F3}, {mp.Inertia[8]:F3})");
+        mp.Clear();
+        mp.Add(1f, new V3(0f, 0f, 0f), new V3(1f, 2f, 3f), Q4.AngleAxis(90f, new V3(0f, 0f, 1f))); // principal x turned onto y
+        mp.Finish();
+        Check(Near((float)mp.Inertia[0], 2f) && Near((float)mp.Inertia[4], 1f) && Near((float)mp.Inertia[8], 3f), "mass props: principal axes rotated into world");
+        mp.Clear();
+        mp.Add(1f, V3.Zero, new V3(2f, 3f, 4f), Q4.Identity);
+        mp.Finish();
+        V3 acc = mp.AngularAccel(new V3(2f, 0f, 0f), V3.Zero);
+        Check(Near(acc.X, 1f) && Near(acc.Y, 0f), "Euler: I^-1 M");
+        acc = mp.AngularAccel(V3.Zero, new V3(1f, 1f, 0f));
+        Check(Near(acc.Z, -0.25f) && Near(acc.X, 0f), $"Euler: gyroscopic term -I^-1 (w x Iw) ({acc})");
     }
 
     private static void CheckPlanner()

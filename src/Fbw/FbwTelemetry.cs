@@ -31,13 +31,14 @@ namespace AutopilotMod.Fbw
             w = new StreamWriter(Path, false, new UTF8Encoding(false), 1 << 16);
 
             sb.Append("t,dt,held,speed,rho,mass,alpha,beta,p,q,r,pdot,qdot,rdot,nz,pitch,roll,yaw,throttle");
+            sb.Append(",aeroErrF,aeroErrM,aeroWorst,aeroSkip,pdotPred,qdotPred,rdotPred");
             foreach (SurfaceLink s in link.Surfaces) sb.Append(',').Append(s.Name).Append("_tgt,").Append(s.Name).Append("_ang,").Append(s.Name).Append("_split");
             for (int i = 0; i < link.Engines.Count; i++) sb.Append(",e").Append(i).Append("_nzx,e").Append(i).Append("_nzy,e").Append(i).Append("_thrust,e").Append(i).Append("_thr");
             w.WriteLine(sb.ToString());
         }
 
         /// <summary>Angles in degrees, rates in deg/s and deg/s^2.</summary>
-        public void Row(AircraftLink link, in AirframeState s, bool held)
+        public void Row(AircraftLink link, in AirframeState s, bool held, AeroCheck check)
         {
             const float D = AirData.Rad2Deg;
             sb.Clear();
@@ -49,6 +50,10 @@ namespace AutopilotMod.Fbw
             N(s.Nz);
             ControlInputs i = link.Shared;
             N(i.pitch); N(i.roll); N(i.yaw); N(i.throttle);
+            // the aero check of the previous tick, and its predicted acceleration over the step this row measured
+            N(check.ForceError); N(check.MomentError); N(check.WorstPart); N(check.Skipped);
+            if (check.Predict(out float pp, out float qp, out float rp)) { N(pp * D); N(qp * D); N(rp * D); }
+            else sb.Append(",,,");
             foreach (SurfaceLink sf in link.Surfaces)
             {
                 if (sf.JobReady) { N(sf.Target); N(sf.Angle); N(sf.Split); }

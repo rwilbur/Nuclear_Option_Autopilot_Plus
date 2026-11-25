@@ -141,7 +141,7 @@ Choices, and the evidence for them:
 | # | What | Done when |
 |---|---|---|
 | 0 | Game facts, airframe exporter | ✅ Facts doc written; all 10 jets exported to `tests/airframes/` (25 Nov 2026) |
-| 1 | Adapter + logging + passthrough (our hook reproduces stock output, then the earlier tick) | Log shows identical surface angles in passthrough |
+| 1 | Adapter + logging + passthrough | ✅ Revoker and Ifrit flights (25 Nov 2026): every surface matched the game's servo model to 0.0001° (`tests/fbw-log-check.js`) |
 | 2 | Effector models checked in game | Modelled vs measured angular acceleration matches across a logged flight, per jet |
 | 3 | INDI + allocator, plain rate laws, Full mode | Bench and game step responses pass the HQ checks on a no-TVC jet, then a TVC jet |
 | 4 | Laws + envelope governor | Full-stick pulls, rolling pulls and releases stay inside limits on every jet |
