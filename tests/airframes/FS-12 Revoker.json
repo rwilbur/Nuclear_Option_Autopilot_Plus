@@ -1,0 +1,7828 @@
+{
+  "unit": "FS-12 Revoker",
+  "exportedUtc": "2026-11-25T14:33:51.5951222Z",
+  "fixedDeltaTime": 0.0166666675,
+  "localSim": true,
+  "airDensity": 1.21137834,
+  "speed": 0.00251433649,
+  "definitionMass": 8680,
+  "parts": 28,
+  "bodies": [
+    {
+      "name": "Fighter1",
+      "isRoot": true,
+      "mass": 1199.96094,
+      "com": [
+        -8.523464E-06,
+        -0.125046775,
+        -0.186910272
+      ],
+      "inertia": [
+        1581.07776,
+        1857.287,
+        694.8292
+      ],
+      "inertiaRotation": [
+        -0.0340271369,
+        -1.12096522E-07,
+        1.32603859E-07,
+        0.9994212
+      ]
+    },
+    {
+      "name": "tail",
+      "isRoot": false,
+      "mass": 800,
+      "com": [
+        3.46899033E-05,
+        -0.122383781,
+        -3.26153469
+      ],
+      "inertia": [
+        649.979,
+        781.4461,
+        353.069183
+      ],
+      "inertiaRotation": [
+        -0.006789091,
+        -1.60923173E-06,
+        1.17781883E-05,
+        0.999977052
+      ]
+    },
+    {
+      "name": "fuselage",
+      "isRoot": false,
+      "mass": 1202.46094,
+      "com": [
+        4.4465065E-05,
+        -0.135225028,
+        3.80788445
+      ],
+      "inertia": [
+        1114.93164,
+        1306.69141,
+        543.1282
+      ],
+      "inertiaRotation": [
+        0.102800526,
+        4.11979381E-05,
+        3.43409338E-05,
+        0.9947023
+      ]
+    },
+    {
+      "name": "cockpit",
+      "isRoot": false,
+      "mass": 350,
+      "com": [
+        5.054474E-05,
+        -0.137075692,
+        6.90836239
+      ],
+      "inertia": [
+        367.835754,
+        366.5258,
+        121.246849
+      ],
+      "inertiaRotation": [
+        0.06207252,
+        0.000114565031,
+        -0.00208607735,
+        0.9980696
+      ]
+    },
+    {
+      "name": "nose",
+      "isRoot": false,
+      "mass": 80,
+      "com": [
+        9.441376E-05,
+        -0.367174417,
+        9.301954
+      ],
+      "inertia": [
+        19.1605511,
+        20.0914879,
+        11.110405
+      ],
+      "inertiaRotation": [
+        -0.009527996,
+        4.34561343E-06,
+        0.0002806658,
+        0.9999547
+      ]
+    },
+    {
+      "name": "cheek_L",
+      "isRoot": false,
+      "mass": 200,
+      "com": [
+        -1.08987021,
+        0.08815799,
+        5.747123
+      ],
+      "inertia": [
+        136.475952,
+        141.308136,
+        9.239249
+      ],
+      "inertiaRotation": [
+        0.0131138051,
+        0.004530523,
+        0.106125914,
+        0.994256
+      ]
+    },
+    {
+      "name": "canard_L",
+      "isRoot": false,
+      "mass": 100,
+      "com": [
+        -2.02507186,
+        0.0840054452,
+        5.42653847
+      ],
+      "inertia": [
+        26.0149746,
+        33.0628662,
+        7.29899263
+      ],
+      "inertiaRotation": [
+        0.0123621449,
+        0.213057548,
+        -0.03201565,
+        0.976436853
+      ]
+    },
+    {
+      "name": "cheek_R",
+      "isRoot": false,
+      "mass": 200,
+      "com": [
+        1.08985114,
+        0.08808046,
+        5.74710941
+      ],
+      "inertia": [
+        136.475922,
+        141.308151,
+        9.239259
+      ],
+      "inertiaRotation": [
+        0.0131182149,
+        -0.004528905,
+        -0.106161743,
+        0.994252145
+      ]
+    },
+    {
+      "name": "canard_R",
+      "isRoot": false,
+      "mass": 100,
+      "com": [
+        2.02501464,
+        0.08383631,
+        5.426485
+      ],
+      "inertia": [
+        26.0149765,
+        33.0628738,
+        7.298999
+      ],
+      "inertiaRotation": [
+        0.01236092,
+        -0.2130552,
+        0.031981606,
+        0.9764387
+      ]
+    },
+    {
+      "name": "wing1a_L",
+      "isRoot": false,
+      "mass": 799.9609,
+      "com": [
+        -1.7827419,
+        -0.4214416,
+        1.70892644
+      ],
+      "inertia": [
+        841.686035,
+        872.9871,
+        82.21196
+      ],
+      "inertiaRotation": [
+        -0.00204695738,
+        0.0187607277,
+        0.10993284,
+        0.9937599
+      ]
+    },
+    {
+      "name": "wing2_L",
+      "isRoot": false,
+      "mass": 639.9844,
+      "com": [
+        -3.202143,
+        -0.5442891,
+        0.660484552
+      ],
+      "inertia": [
+        480.980133,
+        588.623169,
+        165.474365
+      ],
+      "inertiaRotation": [
+        -0.008816017,
+        0.0751495,
+        0.173672065,
+        0.981892645
+      ]
+    },
+    {
+      "name": "wingtip_L",
+      "isRoot": false,
+      "mass": 484.999969,
+      "com": [
+        -4.952727,
+        -0.395404756,
+        0.255283475
+      ],
+      "inertia": [
+        235.085449,
+        408.3666,
+        174.874878
+      ],
+      "inertiaRotation": [
+        -0.0014169697,
+        0.143417776,
+        -0.000193105123,
+        0.9896614
+      ]
+    },
+    {
+      "name": "aileron_L",
+      "isRoot": false,
+      "mass": 400,
+      "com": [
+        -4.46168041,
+        -0.412593633,
+        -0.90520215
+      ],
+      "inertia": [
+        9.581306,
+        91.58179,
+        82.7285
+      ],
+      "inertiaRotation": [
+        -0.0150227221,
+        0.124327563,
+        0.007995196,
+        0.9920955
+      ]
+    },
+    {
+      "name": "flap_L",
+      "isRoot": false,
+      "mass": 400,
+      "com": [
+        -2.96993351,
+        -0.3723257,
+        -1.13229668
+      ],
+      "inertia": [
+        22.06683,
+        71.51092,
+        50.56467
+      ],
+      "inertiaRotation": [
+        0.0201670025,
+        0.120229751,
+        0.0101150637,
+        0.9924898
+      ]
+    },
+    {
+      "name": "intake_L",
+      "isRoot": false,
+      "mass": 150,
+      "com": [
+        -1.04855251,
+        -0.643225,
+        4.992879
+      ],
+      "inertia": [
+        60.6000328,
+        54.8673134,
+        9.713869
+      ],
+      "inertiaRotation": [
+        -0.05670343,
+        0.0141954515,
+        0.277498633,
+        0.958946347
+      ]
+    },
+    {
+      "name": "wing1a_R",
+      "isRoot": false,
+      "mass": 799.9609,
+      "com": [
+        1.7827208,
+        -0.421535283,
+        1.70901811
+      ],
+      "inertia": [
+        841.7179,
+        873.0264,
+        82.20595
+      ],
+      "inertiaRotation": [
+        -0.00206045969,
+        -0.0187606979,
+        -0.109924965,
+        0.9937608
+      ]
+    },
+    {
+      "name": "wing2_R",
+      "isRoot": false,
+      "mass": 639.9844,
+      "com": [
+        3.20256233,
+        -0.5444827,
+        0.6604662
+      ],
+      "inertia": [
+        480.949219,
+        588.8306,
+        165.629013
+      ],
+      "inertiaRotation": [
+        -0.008819607,
+        -0.07522831,
+        -0.1738637,
+        0.9818527
+      ]
+    },
+    {
+      "name": "wingtip_R",
+      "isRoot": false,
+      "mass": 484.999969,
+      "com": [
+        4.95271,
+        -0.3956141,
+        0.255250216
+      ],
+      "inertia": [
+        235.088486,
+        408.3635,
+        174.86882
+      ],
+      "inertiaRotation": [
+        -0.00141289644,
+        -0.143432751,
+        0.0001626763,
+        0.9896591
+      ]
+    },
+    {
+      "name": "aileron_R",
+      "isRoot": false,
+      "mass": 400,
+      "com": [
+        4.46169,
+        -0.412822843,
+        -0.9052073
+      ],
+      "inertia": [
+        9.581305,
+        91.5818,
+        82.72851
+      ],
+      "inertiaRotation": [
+        -0.0150247859,
+        -0.124331988,
+        -0.00801285,
+        0.9920947
+      ]
+    },
+    {
+      "name": "flap_R",
+      "isRoot": false,
+      "mass": 400,
+      "com": [
+        2.96996379,
+        -0.372437328,
+        -1.13232052
+      ],
+      "inertia": [
+        22.0668278,
+        71.51092,
+        50.5646629
+      ],
+      "inertiaRotation": [
+        0.0201656967,
+        -0.120239384,
+        -0.0101436805,
+        0.992488563
+      ]
+    },
+    {
+      "name": "intake_R",
+      "isRoot": false,
+      "mass": 150,
+      "com": [
+        1.04856014,
+        -0.643297255,
+        4.99285555
+      ],
+      "inertia": [
+        60.6000328,
+        54.8673019,
+        9.713862
+      ],
+      "inertiaRotation": [
+        -0.05670588,
+        -0.0141843343,
+        -0.277532578,
+        0.9589366
+      ]
+    },
+    {
+      "name": "wing1b_L",
+      "isRoot": false,
+      "mass": 624.96875,
+      "com": [
+        -1.70031118,
+        -0.388345748,
+        -1.241783
+      ],
+      "inertia": [
+        504.111,
+        527.417664,
+        62.85273
+      ],
+      "inertiaRotation": [
+        0.03408917,
+        -0.0423504971,
+        0.0277452562,
+        0.9981357
+      ]
+    },
+    {
+      "name": "wing1b_R",
+      "isRoot": false,
+      "mass": 624.96875,
+      "com": [
+        1.7009424,
+        -0.38837263,
+        -1.25835776
+      ],
+      "inertia": [
+        503.853821,
+        527.1127,
+        62.8069878
+      ],
+      "inertiaRotation": [
+        0.034109,
+        0.04221272,
+        -0.0280812345,
+        0.998131454
+      ]
+    },
+    {
+      "name": "weaponbay_L",
+      "isRoot": false,
+      "mass": 920.000061,
+      "com": [
+        -0.729033,
+        -0.8114272,
+        1.70501709
+      ],
+      "inertia": [
+        872.648865,
+        970.309631,
+        147.482025
+      ],
+      "inertiaRotation": [
+        -0.0135953873,
+        0.015269665,
+        -0.0755344257,
+        0.9969336
+      ]
+    },
+    {
+      "name": "weaponbay_R",
+      "isRoot": false,
+      "mass": 920.000061,
+      "com": [
+        0.7319101,
+        -0.8114741,
+        1.70447862
+      ],
+      "inertia": [
+        873.14,
+        972.085632,
+        148.58287
+      ],
+      "inertiaRotation": [
+        -0.0136501072,
+        -0.0160742942,
+        0.0766015649,
+        0.9968389
+      ]
+    },
+    {
+      "name": "vstab1",
+      "isRoot": false,
+      "mass": 200,
+      "com": [
+        5.507469E-05,
+        1.34621131,
+        -1.7087208
+      ],
+      "inertia": [
+        99.18808,
+        85.77284,
+        15.50286
+      ],
+      "inertiaRotation": [
+        0.08471216,
+        1.29771877E-06,
+        2.33012452E-06,
+        0.9964055
+      ]
+    },
+    {
+      "name": "vstab2",
+      "isRoot": false,
+      "mass": 150,
+      "com": [
+        -0.00028181076,
+        2.304428,
+        -2.39388132
+      ],
+      "inertia": [
+        25.8853,
+        20.9284229,
+        5.639703
+      ],
+      "inertiaRotation": [
+        0.201685414,
+        5.32667837E-05,
+        0.000147180166,
+        0.9794505
+      ]
+    },
+    {
+      "name": "rudder",
+      "isRoot": false,
+      "mass": 150,
+      "com": [
+        -4.017353E-05,
+        1.639465,
+        -3.044512
+      ],
+      "inertia": [
+        47.7373352,
+        4.697401,
+        44.0206337
+      ],
+      "inertiaRotation": [
+        -0.0865911245,
+        -1.20747518E-06,
+        3.09896642E-08,
+        0.9962441
+      ]
+    }
+  ],
+  "aeroParts": [
+    {
+      "type": "AeroPart",
+      "path": "",
+      "pose": {
+        "path": "",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "right": [
+          1,
+          0,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "forward": [
+          0,
+          0,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2",
+        "dragArea=0.30591",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=True",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=1199.96094",
+        "collisionSize=(2.30245972,0.9879513,2.16113281)",
+        "rb->Rigidbody:",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=15",
+        "armorProperties.blastArmor=60",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=10",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=20",
+        "impactDamage.multiplier=1",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=3",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=700",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[1]": {
+          "path": "airbrake_L",
+          "position": [
+            -0.8822557,
+            0.2621625,
+            1.73611116
+          ],
+          "right": [
+            0.8290374,
+            0.5591932,
+            2.23517418E-08
+          ],
+          "up": [
+            -0.534822643,
+            0.7929066,
+            0.292000026
+          ],
+          "forward": [
+            0.163284391,
+            -0.242078975,
+            0.956418335
+          ]
+        },
+        "damageMaterial.renderers._items[2]": {
+          "path": "airbrake_R",
+          "position": [
+            0.882264256,
+            0.2621623,
+            1.73611319
+          ],
+          "right": [
+            0.829037368,
+            -0.5591932,
+            2.98023224E-08
+          ],
+          "up": [
+            0.534822643,
+            0.7929065,
+            0.292000055
+          ],
+          "forward": [
+            -0.163284466,
+            -0.24207896,
+            0.9564183
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "tail",
+      "pose": {
+        "path": "tail",
+        "position": [
+          3.528595E-05,
+          -0.259309024,
+          -3.74551535
+        ],
+        "right": [
+          1,
+          2.39848341E-05,
+          1.67456869E-06
+        ],
+        "up": [
+          -2.39848414E-05,
+          1,
+          4.497884E-06
+        ],
+        "forward": [
+          -1.67446092E-06,
+          -4.49792424E-06,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=1.5",
+        "dragArea=0.305910021",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=800",
+        "collisionSize=(1.87167358,0.9857559,1.74926758)",
+        "rb->Rigidbody:tail",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=70",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=4",
+        "armorProperties.blastTolerance=3",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=20",
+        "impactDamage.multiplier=2",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=800",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "tail",
+          "position": [
+            3.528595E-05,
+            -0.259309024,
+            -3.74551535
+          ],
+          "right": [
+            1,
+            2.39848341E-05,
+            1.67456869E-06
+          ],
+          "up": [
+            -2.39848414E-05,
+            1,
+            4.497884E-06
+          ],
+          "forward": [
+            -1.67446092E-06,
+            -4.49792424E-06,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "tail",
+          "position": [
+            3.528595E-05,
+            -0.259309024,
+            -3.74551535
+          ],
+          "right": [
+            1,
+            2.39848341E-05,
+            1.67456869E-06
+          ],
+          "up": [
+            -2.39848414E-05,
+            1,
+            4.497884E-06
+          ],
+          "forward": [
+            -1.67446092E-06,
+            -4.49792424E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "tail",
+          "position": [
+            3.528595E-05,
+            -0.259309024,
+            -3.74551535
+          ],
+          "right": [
+            1,
+            2.39848341E-05,
+            1.67456869E-06
+          ],
+          "up": [
+            -2.39848414E-05,
+            1,
+            4.497884E-06
+          ],
+          "forward": [
+            -1.67446092E-06,
+            -4.49792424E-06,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "tail",
+          "position": [
+            3.528595E-05,
+            -0.259309024,
+            -3.74551535
+          ],
+          "right": [
+            1,
+            2.39848341E-05,
+            1.67456869E-06
+          ],
+          "up": [
+            -2.39848414E-05,
+            1,
+            4.497884E-06
+          ],
+          "forward": [
+            -1.67446092E-06,
+            -4.49792424E-06,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "fuselage",
+      "pose": {
+        "path": "fuselage",
+        "position": [
+          2.53915787E-05,
+          0.0432960652,
+          3.3374877
+        ],
+        "right": [
+          1,
+          -7.653089E-06,
+          -8.091402E-06
+        ],
+        "up": [
+          7.653087E-06,
+          1,
+          -2.956349E-07
+        ],
+        "forward": [
+          8.091404E-06,
+          2.95573E-07,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2",
+        "dragArea=0.163152009",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=1202.46094",
+        "collisionSize=(2.01931763,0.9648886,1.81030273)",
+        "rb->Rigidbody:fuselage",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=15",
+        "armorProperties.blastArmor=70",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=10",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=-200",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=30",
+        "impactDamage.multiplier=1",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=500",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "fuselage",
+          "position": [
+            2.53915787E-05,
+            0.0432960652,
+            3.3374877
+          ],
+          "right": [
+            1,
+            -7.653089E-06,
+            -8.091402E-06
+          ],
+          "up": [
+            7.653087E-06,
+            1,
+            -2.956349E-07
+          ],
+          "forward": [
+            8.091404E-06,
+            2.95573E-07,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "fuselage",
+          "position": [
+            2.53915787E-05,
+            0.0432960652,
+            3.3374877
+          ],
+          "right": [
+            1,
+            -7.653089E-06,
+            -8.091402E-06
+          ],
+          "up": [
+            7.653087E-06,
+            1,
+            -2.956349E-07
+          ],
+          "forward": [
+            8.091404E-06,
+            2.95573E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "fuselage",
+          "position": [
+            2.53915787E-05,
+            0.0432960652,
+            3.3374877
+          ],
+          "right": [
+            1,
+            -7.653089E-06,
+            -8.091402E-06
+          ],
+          "up": [
+            7.653087E-06,
+            1,
+            -2.956349E-07
+          ],
+          "forward": [
+            8.091404E-06,
+            2.95573E-07,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "fuselage",
+          "position": [
+            2.53915787E-05,
+            0.0432960652,
+            3.3374877
+          ],
+          "right": [
+            1,
+            -7.653089E-06,
+            -8.091402E-06
+          ],
+          "up": [
+            7.653087E-06,
+            1,
+            -2.956349E-07
+          ],
+          "forward": [
+            8.091404E-06,
+            2.95573E-07,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "cockpit",
+      "pose": {
+        "path": "cockpit",
+        "position": [
+          4.529953E-05,
+          -0.009618275,
+          7.17956924
+        ],
+        "right": [
+          1,
+          -3.3790584E-05,
+          -6.57842E-06
+        ],
+        "up": [
+          3.3790584E-05,
+          1,
+          -2.11260726E-07
+        ],
+        "forward": [
+          6.57842747E-06,
+          2.1103844E-07,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=0.5",
+        "dragArea=1",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=350",
+        "collisionSize=(1.88870239,0.9813652,1.65435791)",
+        "rb->Rigidbody:cockpit",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=70",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=15",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=5",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=350",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "cockpit",
+          "position": [
+            4.529953E-05,
+            -0.009618275,
+            7.17956924
+          ],
+          "right": [
+            1,
+            -3.3790584E-05,
+            -6.57842E-06
+          ],
+          "up": [
+            3.3790584E-05,
+            1,
+            -2.11260726E-07
+          ],
+          "forward": [
+            6.57842747E-06,
+            2.1103844E-07,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "cockpit",
+          "position": [
+            4.529953E-05,
+            -0.009618275,
+            7.17956924
+          ],
+          "right": [
+            1,
+            -3.3790584E-05,
+            -6.57842E-06
+          ],
+          "up": [
+            3.3790584E-05,
+            1,
+            -2.11260726E-07
+          ],
+          "forward": [
+            6.57842747E-06,
+            2.1103844E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "cockpit",
+          "position": [
+            4.529953E-05,
+            -0.009618275,
+            7.17956924
+          ],
+          "right": [
+            1,
+            -3.3790584E-05,
+            -6.57842E-06
+          ],
+          "up": [
+            3.3790584E-05,
+            1,
+            -2.11260726E-07
+          ],
+          "forward": [
+            6.57842747E-06,
+            2.1103844E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[1]": {
+          "path": "cockpit/geardoor_FL",
+          "position": [
+            -0.270245552,
+            -1.02973723,
+            6.48136854
+          ],
+          "right": [
+            -3.4213077E-05,
+            -1.00000036,
+            2.27795E-07
+          ],
+          "up": [
+            1.00000036,
+            -3.4213077E-05,
+            -6.616705E-06
+          ],
+          "forward": [
+            6.616713E-06,
+            2.27570808E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[2]": {
+          "path": "cockpit/geardoor_FR",
+          "position": [
+            0.270228624,
+            -1.02975571,
+            6.481356
+          ],
+          "right": [
+            3.35574041E-05,
+            1.00000036,
+            -2.27795E-07
+          ],
+          "up": [
+            -1.00000036,
+            3.35574041E-05,
+            6.616705E-06
+          ],
+          "forward": [
+            6.616713E-06,
+            2.27570808E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[3]": {
+          "path": "cockpit/geardoorHinge_FF/geardoor_FF",
+          "position": [
+            3.33786E-05,
+            -1.03261757,
+            7.8895483
+          ],
+          "right": [
+            3.33189964E-05,
+            1.00000048,
+            -1.1920929E-07
+          ],
+          "up": [
+            -6.556511E-06,
+            -6.556511E-07,
+            -1.00000048
+          ],
+          "forward": [
+            -1.00000048,
+            3.38256359E-05,
+            6.07967377E-06
+          ]
+        },
+        "damageMaterial.renderers._items[4]": {
+          "path": "cockpit/canopyHingea/canopyHingeb/canopyFrame",
+          "position": [
+            6.842613E-05,
+            0.6245064,
+            7.162664
+          ],
+          "right": [
+            1,
+            -3.3790584E-05,
+            -6.57842E-06
+          ],
+          "up": [
+            3.3790584E-05,
+            1,
+            -2.11260726E-07
+          ],
+          "forward": [
+            6.57842747E-06,
+            2.1103844E-07,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "cockpit",
+          "position": [
+            4.529953E-05,
+            -0.009618275,
+            7.17956924
+          ],
+          "right": [
+            1,
+            -3.3790584E-05,
+            -6.57842E-06
+          ],
+          "up": [
+            3.3790584E-05,
+            1,
+            -2.11260726E-07
+          ],
+          "forward": [
+            6.57842747E-06,
+            2.1103844E-07,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "nose",
+      "pose": {
+        "path": "nose",
+        "position": [
+          6.96182251E-05,
+          -0.371066421,
+          9.528357
+        ],
+        "right": [
+          1,
+          1.501774E-05,
+          -3.998127E-07
+        ],
+        "up": [
+          -1.50177475E-05,
+          1,
+          -1.6159649E-05
+        ],
+        "forward": [
+          3.99570041E-07,
+          1.61596563E-05,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=0.5",
+        "dragArea=0.030590998",
+        "streamlining=1.8",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=80",
+        "collisionSize=(1.01083374,0.6385994,0.881164551)",
+        "rb->Rigidbody:nose",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=50",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=3",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=80",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "nose/nose_liftNormal",
+          "position": [
+            6.96182251E-05,
+            -0.371066421,
+            9.528357
+          ],
+          "right": [
+            -1.52588582E-05,
+            1.00000024,
+            -1.61618555E-05
+          ],
+          "up": [
+            -1.00000024,
+            -1.525885E-05,
+            3.988298E-07
+          ],
+          "forward": [
+            3.98586053E-07,
+            1.61618609E-05,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "nose",
+          "position": [
+            6.96182251E-05,
+            -0.371066421,
+            9.528357
+          ],
+          "right": [
+            1,
+            1.501774E-05,
+            -3.998127E-07
+          ],
+          "up": [
+            -1.50177475E-05,
+            1,
+            -1.6159649E-05
+          ],
+          "forward": [
+            3.99570041E-07,
+            1.61596563E-05,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "nose",
+          "position": [
+            6.96182251E-05,
+            -0.371066421,
+            9.528357
+          ],
+          "right": [
+            1,
+            1.501774E-05,
+            -3.998127E-07
+          ],
+          "up": [
+            -1.50177475E-05,
+            1,
+            -1.6159649E-05
+          ],
+          "forward": [
+            3.99570041E-07,
+            1.61596563E-05,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "nose",
+          "position": [
+            6.96182251E-05,
+            -0.371066421,
+            9.528357
+          ],
+          "right": [
+            1,
+            1.501774E-05,
+            -3.998127E-07
+          ],
+          "up": [
+            -1.50177475E-05,
+            1,
+            -1.6159649E-05
+          ],
+          "forward": [
+            3.99570041E-07,
+            1.61596563E-05,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "cheek_L",
+      "pose": {
+        "path": "cheek_L",
+        "position": [
+          -1.17472363,
+          0.05383972,
+          5.630591
+        ],
+        "right": [
+          1,
+          -3.35355471E-05,
+          -5.61738761E-06
+        ],
+        "up": [
+          3.353549E-05,
+          1,
+          -1.0395519E-05
+        ],
+        "forward": [
+          5.617736E-06,
+          1.039533E-05,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=0.65",
+        "dragArea=0.020394",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=200",
+        "collisionSize=(1.70611572,0.300540924,1.07049561)",
+        "rb->Rigidbody:cheek_L",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=60",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=3",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=200",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "cheek_L",
+          "position": [
+            -1.17472363,
+            0.05383972,
+            5.630591
+          ],
+          "right": [
+            1,
+            -3.35355471E-05,
+            -5.61738761E-06
+          ],
+          "up": [
+            3.353549E-05,
+            1,
+            -1.0395519E-05
+          ],
+          "forward": [
+            5.617736E-06,
+            1.039533E-05,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "cheek_L",
+          "position": [
+            -1.17472363,
+            0.05383972,
+            5.630591
+          ],
+          "right": [
+            1,
+            -3.35355471E-05,
+            -5.61738761E-06
+          ],
+          "up": [
+            3.353549E-05,
+            1,
+            -1.0395519E-05
+          ],
+          "forward": [
+            5.617736E-06,
+            1.039533E-05,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "cheek_L",
+          "position": [
+            -1.17472363,
+            0.05383972,
+            5.630591
+          ],
+          "right": [
+            1,
+            -3.35355471E-05,
+            -5.61738761E-06
+          ],
+          "up": [
+            3.353549E-05,
+            1,
+            -1.0395519E-05
+          ],
+          "forward": [
+            5.617736E-06,
+            1.039533E-05,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "cheek_L",
+          "position": [
+            -1.17472363,
+            0.05383972,
+            5.630591
+          ],
+          "right": [
+            1,
+            -3.35355471E-05,
+            -5.61738761E-06
+          ],
+          "up": [
+            3.353549E-05,
+            1,
+            -1.0395519E-05
+          ],
+          "forward": [
+            5.617736E-06,
+            1.039533E-05,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "canard_L",
+      "pose": {
+        "path": "canard_L",
+        "position": [
+          -2.139667,
+          0.09302119,
+          5.325095
+        ],
+        "right": [
+          1,
+          -6.483486E-05,
+          -9.333564E-07
+        ],
+        "up": [
+          6.483484E-05,
+          1,
+          -1.14075847E-05
+        ],
+        "forward": [
+          9.34096E-07,
+          1.14075247E-05,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2",
+        "dragArea=0.008157601",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=0",
+        "airfoilID=8",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=100",
+        "collisionSize=(1.19459534,0.099609375,0.637939453)",
+        "rb->Rigidbody:canard_L",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=40",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=4",
+        "armorProperties.blastTolerance=3",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=100",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "canard_L/canard_L_visible/canard_L_liftNormal",
+          "position": [
+            -2.52565527,
+            0.04240669,
+            5.4853797
+          ],
+          "right": [
+            1,
+            -6.483361E-05,
+            -9.567349E-07
+          ],
+          "up": [
+            6.474988E-05,
+            0.9992716,
+            -0.03816218
+          ],
+          "forward": [
+            3.43023021E-06,
+            0.03816218,
+            0.9992716
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "canard_L",
+          "position": [
+            -2.139667,
+            0.09302119,
+            5.325095
+          ],
+          "right": [
+            1,
+            -6.483486E-05,
+            -9.333564E-07
+          ],
+          "up": [
+            6.483484E-05,
+            1,
+            -1.14075847E-05
+          ],
+          "forward": [
+            9.34096E-07,
+            1.14075247E-05,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "canard_L/canard_L_visible",
+          "position": [
+            -1.52565145,
+            0.05798769,
+            5.895079
+          ],
+          "right": [
+            1,
+            -6.483361E-05,
+            -9.567349E-07
+          ],
+          "up": [
+            6.474988E-05,
+            0.9992716,
+            -0.03816218
+          ],
+          "forward": [
+            3.43023021E-06,
+            0.03816218,
+            0.9992716
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "canard_L",
+          "position": [
+            -2.139667,
+            0.09302119,
+            5.325095
+          ],
+          "right": [
+            1,
+            -6.483486E-05,
+            -9.333564E-07
+          ],
+          "up": [
+            6.483484E-05,
+            1,
+            -1.14075847E-05
+          ],
+          "forward": [
+            9.34096E-07,
+            1.14075247E-05,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "cheek_R",
+      "pose": {
+        "path": "cheek_R",
+        "position": [
+          1.17476571,
+          0.05375658,
+          5.63057947
+        ],
+        "right": [
+          1,
+          -3.86809843E-05,
+          6.99139E-07
+        ],
+        "up": [
+          3.86809843E-05,
+          1,
+          -8.02302168E-07
+        ],
+        "forward": [
+          -6.99107943E-07,
+          8.023292E-07,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=0.65",
+        "dragArea=0.020394",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=200",
+        "collisionSize=(1.51734924,0.300540924,1.324585)",
+        "rb->Rigidbody:cheek_R",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=60",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=3",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=200",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "cheek_R",
+          "position": [
+            1.17476571,
+            0.05375658,
+            5.63057947
+          ],
+          "right": [
+            1,
+            -3.86809843E-05,
+            6.99139E-07
+          ],
+          "up": [
+            3.86809843E-05,
+            1,
+            -8.02302168E-07
+          ],
+          "forward": [
+            -6.99107943E-07,
+            8.023292E-07,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "cheek_R",
+          "position": [
+            1.17476571,
+            0.05375658,
+            5.63057947
+          ],
+          "right": [
+            1,
+            -3.86809843E-05,
+            6.99139E-07
+          ],
+          "up": [
+            3.86809843E-05,
+            1,
+            -8.02302168E-07
+          ],
+          "forward": [
+            -6.99107943E-07,
+            8.023292E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "cheek_R",
+          "position": [
+            1.17476571,
+            0.05375658,
+            5.63057947
+          ],
+          "right": [
+            1,
+            -3.86809843E-05,
+            6.99139E-07
+          ],
+          "up": [
+            3.86809843E-05,
+            1,
+            -8.02302168E-07
+          ],
+          "forward": [
+            -6.99107943E-07,
+            8.023292E-07,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "cheek_R",
+          "position": [
+            1.17476571,
+            0.05375658,
+            5.63057947
+          ],
+          "right": [
+            1,
+            -3.86809843E-05,
+            6.99139E-07
+          ],
+          "up": [
+            3.86809843E-05,
+            1,
+            -8.02302168E-07
+          ],
+          "forward": [
+            -6.99107943E-07,
+            8.023292E-07,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "canard_R",
+      "pose": {
+        "path": "canard_R",
+        "position": [
+          2.13960838,
+          0.09284655,
+          5.32506847
+        ],
+        "right": [
+          1,
+          -1.46673449E-06,
+          -6.512164E-06
+        ],
+        "up": [
+          1.46673563E-06,
+          1,
+          1.58056679E-07
+        ],
+        "forward": [
+          6.512164E-06,
+          -1.58066229E-07,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2",
+        "dragArea=0.008157601",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=0",
+        "airfoilID=8",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=100",
+        "collisionSize=(0.769683838,0.099609375,1.09936523)",
+        "rb->Rigidbody:canard_R",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=40",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=4",
+        "armorProperties.blastTolerance=3",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=100",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "canard_R/canard_R_visible/canard_R_liftNormal",
+          "position": [
+            2.52562141,
+            -0.00524879433,
+            5.48994637
+          ],
+          "right": [
+            1,
+            -1.47118385E-06,
+            -6.553227E-06
+          ],
+          "up": [
+            4.45180774E-07,
+            0.988087952,
+            -0.153890356
+          ],
+          "forward": [
+            6.701566E-06,
+            0.153890356,
+            0.988087952
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "canard_R",
+          "position": [
+            2.13960838,
+            0.09284655,
+            5.32506847
+          ],
+          "right": [
+            1,
+            -1.46673449E-06,
+            -6.512164E-06
+          ],
+          "up": [
+            1.46673563E-06,
+            1,
+            1.58056679E-07
+          ],
+          "forward": [
+            6.512164E-06,
+            -1.58066229E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "canard_R/canard_R_visible",
+          "position": [
+            1.52563787,
+            0.05784712,
+            5.895059
+          ],
+          "right": [
+            1,
+            -1.47118385E-06,
+            -6.553227E-06
+          ],
+          "up": [
+            4.45180774E-07,
+            0.988087952,
+            -0.153890356
+          ],
+          "forward": [
+            6.701566E-06,
+            0.153890356,
+            0.988087952
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "canard_R",
+          "position": [
+            2.13960838,
+            0.09284655,
+            5.32506847
+          ],
+          "right": [
+            1,
+            -1.46673449E-06,
+            -6.512164E-06
+          ],
+          "up": [
+            1.46673563E-06,
+            1,
+            1.58056679E-07
+          ],
+          "forward": [
+            6.512164E-06,
+            -1.58066229E-07,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "wing1a_L",
+      "pose": {
+        "path": "wing1a_L",
+        "position": [
+          -1.89652014,
+          -0.441013336,
+          1.81603217
+        ],
+        "right": [
+          1,
+          2.517894E-06,
+          -1.58589137E-06
+        ],
+        "up": [
+          -2.51790129E-06,
+          1,
+          -4.68404869E-06
+        ],
+        "forward": [
+          1.58587955E-06,
+          4.68405233E-06,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2.5",
+        "dragArea=2",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=799.960938",
+        "collisionSize=(2.09979248,0.428897858,1.37219238)",
+        "rb->Rigidbody:wing1a_L",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=15",
+        "armorProperties.blastArmor=70",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=20",
+        "impactDamage.multiplier=1",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=3",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=300",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "wing1a_L",
+          "position": [
+            -1.89652014,
+            -0.441013336,
+            1.81603217
+          ],
+          "right": [
+            1,
+            2.517894E-06,
+            -1.58589137E-06
+          ],
+          "up": [
+            -2.51790129E-06,
+            1,
+            -4.68404869E-06
+          ],
+          "forward": [
+            1.58587955E-06,
+            4.68405233E-06,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "wing1a_L",
+          "position": [
+            -1.89652014,
+            -0.441013336,
+            1.81603217
+          ],
+          "right": [
+            1,
+            2.517894E-06,
+            -1.58589137E-06
+          ],
+          "up": [
+            -2.51790129E-06,
+            1,
+            -4.68404869E-06
+          ],
+          "forward": [
+            1.58587955E-06,
+            4.68405233E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "wing1a_L/geardoor_L",
+          "position": [
+            -1.44504821,
+            -0.7879037,
+            0.8201507
+          ],
+          "right": [
+            -0.173650861,
+            0.984807551,
+            -4.2974707E-06
+          ],
+          "up": [
+            -0.984807551,
+            -0.173650861,
+            2.39842961E-06
+          ],
+          "forward": [
+            1.61573257E-06,
+            4.64866935E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[1]": {
+          "path": "wing1a_L/geardoor_LL",
+          "position": [
+            -2.34723425,
+            -0.4689427,
+            1.05603015
+          ],
+          "right": [
+            0.5000021,
+            -0.8660243,
+            3.29122713E-06
+          ],
+          "up": [
+            0.8660243,
+            0.5000021,
+            -3.686762E-06
+          ],
+          "forward": [
+            1.54720419E-06,
+            4.693671E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[2]": {
+          "path": "wing1a_L",
+          "position": [
+            -1.89652014,
+            -0.441013336,
+            1.81603217
+          ],
+          "right": [
+            1,
+            2.517894E-06,
+            -1.58589137E-06
+          ],
+          "up": [
+            -2.51790129E-06,
+            1,
+            -4.68404869E-06
+          ],
+          "forward": [
+            1.58587955E-06,
+            4.68405233E-06,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "wing1a_L",
+          "position": [
+            -1.89652014,
+            -0.441013336,
+            1.81603217
+          ],
+          "right": [
+            1,
+            2.517894E-06,
+            -1.58589137E-06
+          ],
+          "up": [
+            -2.51790129E-06,
+            1,
+            -4.68404869E-06
+          ],
+          "forward": [
+            1.58587955E-06,
+            4.68405233E-06,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "wing2_L",
+      "pose": {
+        "path": "wing2_L",
+        "position": [
+          -3.1755774,
+          -0.3947208,
+          0.9729825
+        ],
+        "right": [
+          1,
+          1.53782239E-05,
+          -2.743745E-06
+        ],
+        "up": [
+          -1.53782967E-05,
+          1,
+          -2.6607624E-05
+        ],
+        "forward": [
+          2.7433357E-06,
+          2.66076677E-05,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=3.8",
+        "dragArea=0.12",
+        "streamlining=0.9",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=639.9844",
+        "collisionSize=(1.91369629,0.113121033,1.32946777)",
+        "rb->Rigidbody:wing2_L",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=10",
+        "armorProperties.blastArmor=60",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=4",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=30",
+        "impactDamage.multiplier=1",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=200",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "wing2_L/wing2_L_liftNormal",
+          "position": [
+            -3.17558479,
+            -0.3947458,
+            0.02298069
+          ],
+          "right": [
+            1,
+            1.53773617E-05,
+            -2.76113542E-06
+          ],
+          "up": [
+            -1.55325542E-05,
+            0.99756217,
+            -0.06978301
+          ],
+          "forward": [
+            1.681326E-06,
+            0.06978301,
+            0.99756217
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "wing2_L",
+          "position": [
+            -3.1755774,
+            -0.3947208,
+            0.9729825
+          ],
+          "right": [
+            1,
+            1.53782239E-05,
+            -2.743745E-06
+          ],
+          "up": [
+            -1.53782967E-05,
+            1,
+            -2.6607624E-05
+          ],
+          "forward": [
+            2.7433357E-06,
+            2.66076677E-05,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "wing2_L",
+          "position": [
+            -3.1755774,
+            -0.3947208,
+            0.9729825
+          ],
+          "right": [
+            1,
+            1.53782239E-05,
+            -2.743745E-06
+          ],
+          "up": [
+            -1.53782967E-05,
+            1,
+            -2.6607624E-05
+          ],
+          "forward": [
+            2.7433357E-06,
+            2.66076677E-05,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "wing2_L",
+          "position": [
+            -3.1755774,
+            -0.3947208,
+            0.9729825
+          ],
+          "right": [
+            1,
+            1.53782239E-05,
+            -2.743745E-06
+          ],
+          "up": [
+            -1.53782967E-05,
+            1,
+            -2.6607624E-05
+          ],
+          "forward": [
+            2.7433357E-06,
+            2.66076677E-05,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "wingtip_L",
+      "pose": {
+        "path": "wingtip_L",
+        "position": [
+          -4.61831665,
+          -0.395703882,
+          0.3780985
+        ],
+        "right": [
+          1,
+          0.0001764827,
+          -7.075088E-08
+        ],
+        "up": [
+          -0.0001764827,
+          1,
+          -2.71627159E-05
+        ],
+        "forward": [
+          6.595713E-08,
+          2.71627268E-05,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=3.25",
+        "dragArea=0.065",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=485",
+        "collisionSize=(1.255188,0.0842723846,1.04412842)",
+        "rb->Rigidbody:wingtip_L",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=40",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=4",
+        "armorProperties.blastTolerance=2.5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=300",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "wingtip_L",
+          "position": [
+            -4.61831665,
+            -0.395703882,
+            0.3780985
+          ],
+          "right": [
+            1,
+            0.0001764827,
+            -7.075088E-08
+          ],
+          "up": [
+            -0.0001764827,
+            1,
+            -2.71627159E-05
+          ],
+          "forward": [
+            6.595713E-08,
+            2.71627268E-05,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "wingtip_L",
+          "position": [
+            -4.61831665,
+            -0.395703882,
+            0.3780985
+          ],
+          "right": [
+            1,
+            0.0001764827,
+            -7.075088E-08
+          ],
+          "up": [
+            -0.0001764827,
+            1,
+            -2.71627159E-05
+          ],
+          "forward": [
+            6.595713E-08,
+            2.71627268E-05,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "wingtip_L",
+          "position": [
+            -4.61831665,
+            -0.395703882,
+            0.3780985
+          ],
+          "right": [
+            1,
+            0.0001764827,
+            -7.075088E-08
+          ],
+          "up": [
+            -0.0001764827,
+            1,
+            -2.71627159E-05
+          ],
+          "forward": [
+            6.595713E-08,
+            2.71627268E-05,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "wingtip_L",
+          "position": [
+            -4.61831665,
+            -0.395703882,
+            0.3780985
+          ],
+          "right": [
+            1,
+            0.0001764827,
+            -7.075088E-08
+          ],
+          "up": [
+            -0.0001764827,
+            1,
+            -2.71627159E-05
+          ],
+          "forward": [
+            6.595713E-08,
+            2.71627268E-05,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "aileron_L",
+      "pose": {
+        "path": "aileron_L",
+        "position": [
+          -4.48852825,
+          -0.414047062,
+          -0.8915088
+        ],
+        "right": [
+          1,
+          0.00019844684,
+          6.49913864E-06
+        ],
+        "up": [
+          -0.000198446782,
+          1,
+          -1.10603332E-05
+        ],
+        "forward": [
+          -6.50133325E-06,
+          1.10590436E-05,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2",
+        "dragArea=0",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(-1,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=400",
+        "collisionSize=(0.5726013,0.0750713348,0.9324951)",
+        "rb->Rigidbody:aileron_L",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=40",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=3",
+        "armorProperties.blastTolerance=2",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=5",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=400",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "aileron_L/aileron_L_visible",
+          "position": [
+            -4.500548,
+            -0.405046016,
+            -0.6094973
+          ],
+          "right": [
+            1,
+            0.000198450041,
+            6.43734165E-06
+          ],
+          "up": [
+            -0.000188686434,
+            0.9397075,
+            0.341979116
+          ],
+          "forward": [
+            6.18165359E-05,
+            -0.341979116,
+            0.9397076
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "aileron_L",
+          "position": [
+            -4.48852825,
+            -0.414047062,
+            -0.8915088
+          ],
+          "right": [
+            1,
+            0.00019844684,
+            6.49913864E-06
+          ],
+          "up": [
+            -0.000198446782,
+            1,
+            -1.10603332E-05
+          ],
+          "forward": [
+            -6.50133325E-06,
+            1.10590436E-05,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "aileron_L/aileron_L_visible",
+          "position": [
+            -4.500548,
+            -0.405046016,
+            -0.6094973
+          ],
+          "right": [
+            1,
+            0.000198450041,
+            6.43734165E-06
+          ],
+          "up": [
+            -0.000188686434,
+            0.9397075,
+            0.341979116
+          ],
+          "forward": [
+            6.18165359E-05,
+            -0.341979116,
+            0.9397076
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "aileron_L",
+          "position": [
+            -4.48852825,
+            -0.414047062,
+            -0.8915088
+          ],
+          "right": [
+            1,
+            0.00019844684,
+            6.49913864E-06
+          ],
+          "up": [
+            -0.000198446782,
+            1,
+            -1.10603332E-05
+          ],
+          "forward": [
+            -6.50133325E-06,
+            1.10590436E-05,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "flap_L",
+      "pose": {
+        "path": "flap_L",
+        "position": [
+          -3.04432631,
+          -0.374311864,
+          -1.11759591
+        ],
+        "right": [
+          1,
+          0.000121045661,
+          -2.07128028E-06
+        ],
+        "up": [
+          -0.000121045676,
+          1,
+          -7.433207E-06
+        ],
+        "forward": [
+          2.07038033E-06,
+          7.433458E-06,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=1.4",
+        "dragArea=0",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=400",
+        "collisionSize=(0.664642334,0.105181694,0.852478)",
+        "rb->Rigidbody:flap_L",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=10",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=3",
+        "armorProperties.blastTolerance=1",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=8",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=400",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "flap_L/flap_L_visible",
+          "position": [
+            -2.96030331,
+            -0.385299325,
+            -0.7906132
+          ],
+          "right": [
+            1,
+            0.00012104799,
+            -2.11123734E-06
+          ],
+          "up": [
+            -0.000110598623,
+            0.906304657,
+            -0.422624975
+          ],
+          "forward": [
+            -4.92444669E-05,
+            0.422624975,
+            0.906304657
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "flap_L",
+          "position": [
+            -3.04432631,
+            -0.374311864,
+            -1.11759591
+          ],
+          "right": [
+            1,
+            0.000121045661,
+            -2.07128028E-06
+          ],
+          "up": [
+            -0.000121045676,
+            1,
+            -7.433207E-06
+          ],
+          "forward": [
+            2.07038033E-06,
+            7.433458E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "flap_L/flap_L_visible",
+          "position": [
+            -2.96030331,
+            -0.385299325,
+            -0.7906132
+          ],
+          "right": [
+            1,
+            0.00012104799,
+            -2.11123734E-06
+          ],
+          "up": [
+            -0.000110598623,
+            0.906304657,
+            -0.422624975
+          ],
+          "forward": [
+            -4.92444669E-05,
+            0.422624975,
+            0.906304657
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "flap_L",
+          "position": [
+            -3.04432631,
+            -0.374311864,
+            -1.11759591
+          ],
+          "right": [
+            1,
+            0.000121045661,
+            -2.07128028E-06
+          ],
+          "up": [
+            -0.000121045676,
+            1,
+            -7.433207E-06
+          ],
+          "forward": [
+            2.07038033E-06,
+            7.433458E-06,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "intake_L",
+      "pose": {
+        "path": "intake_L",
+        "position": [
+          -1.05755663,
+          -0.5973044,
+          5.1169014
+        ],
+        "right": [
+          1,
+          -6.75054544E-05,
+          -1.06509242E-05
+        ],
+        "up": [
+          6.750547E-05,
+          1,
+          1.803436E-06
+        ],
+        "forward": [
+          1.06508023E-05,
+          -1.804155E-06,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=0.4",
+        "dragArea=0.040788",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=150",
+        "collisionSize=(1.08265686,0.441878319,0.9929199)",
+        "rb->Rigidbody:intake_L",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=60",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=3",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=5",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=150",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "intake_L",
+          "position": [
+            -1.05755663,
+            -0.5973044,
+            5.1169014
+          ],
+          "right": [
+            1,
+            -6.75054544E-05,
+            -1.06509242E-05
+          ],
+          "up": [
+            6.750547E-05,
+            1,
+            1.803436E-06
+          ],
+          "forward": [
+            1.06508023E-05,
+            -1.804155E-06,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "intake_L",
+          "position": [
+            -1.05755663,
+            -0.5973044,
+            5.1169014
+          ],
+          "right": [
+            1,
+            -6.75054544E-05,
+            -1.06509242E-05
+          ],
+          "up": [
+            6.750547E-05,
+            1,
+            1.803436E-06
+          ],
+          "forward": [
+            1.06508023E-05,
+            -1.804155E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "intake_L",
+          "position": [
+            -1.05755663,
+            -0.5973044,
+            5.1169014
+          ],
+          "right": [
+            1,
+            -6.75054544E-05,
+            -1.06509242E-05
+          ],
+          "up": [
+            6.750547E-05,
+            1,
+            1.803436E-06
+          ],
+          "forward": [
+            1.06508023E-05,
+            -1.804155E-06,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "intake_L",
+          "position": [
+            -1.05755663,
+            -0.5973044,
+            5.1169014
+          ],
+          "right": [
+            1,
+            -6.75054544E-05,
+            -1.06509242E-05
+          ],
+          "up": [
+            6.750547E-05,
+            1,
+            1.803436E-06
+          ],
+          "forward": [
+            1.06508023E-05,
+            -1.804155E-06,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "wing1a_R",
+      "pose": {
+        "path": "wing1a_R",
+        "position": [
+          1.89653277,
+          -0.44106847,
+          1.8160466
+        ],
+        "right": [
+          1,
+          -3.86786051E-05,
+          6.458937E-07
+        ],
+        "up": [
+          3.86786051E-05,
+          1,
+          -7.969582E-07
+        ],
+        "forward": [
+          -6.458629E-07,
+          7.969832E-07,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2.5",
+        "dragArea=2",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=799.960938",
+        "collisionSize=(1.82547,0.428897858,1.74279785)",
+        "rb->Rigidbody:wing1a_R",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=15",
+        "armorProperties.blastArmor=70",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=20",
+        "impactDamage.multiplier=1",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=3",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=300",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "wing1a_R",
+          "position": [
+            1.89653277,
+            -0.44106847,
+            1.8160466
+          ],
+          "right": [
+            1,
+            -3.86786051E-05,
+            6.458937E-07
+          ],
+          "up": [
+            3.86786051E-05,
+            1,
+            -7.969582E-07
+          ],
+          "forward": [
+            -6.458629E-07,
+            7.969832E-07,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "wing1a_R",
+          "position": [
+            1.89653277,
+            -0.44106847,
+            1.8160466
+          ],
+          "right": [
+            1,
+            -3.86786051E-05,
+            6.458937E-07
+          ],
+          "up": [
+            3.86786051E-05,
+            1,
+            -7.969582E-07
+          ],
+          "forward": [
+            -6.458629E-07,
+            7.969832E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "wing1a_R/geardoor_R",
+          "position": [
+            1.44500935,
+            -0.7879388,
+            0.8201524
+          ],
+          "right": [
+            -0.1736865,
+            -0.9848013,
+            6.401036E-07
+          ],
+          "up": [
+            0.9848013,
+            -0.1736865,
+            8.45408E-07
+          ],
+          "forward": [
+            -7.213815E-07,
+            7.7721046E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[1]": {
+          "path": "wing1a_R/geardoor_RR",
+          "position": [
+            2.34722853,
+            -0.469011962,
+            1.04748106
+          ],
+          "right": [
+            0.500033438,
+            0.8660062,
+            -3.41693237E-07
+          ],
+          "up": [
+            -0.8660062,
+            0.500033438,
+            -9.763979E-07
+          ],
+          "forward": [
+            -6.747085E-07,
+            7.841401E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[2]": {
+          "path": "wing1a_R",
+          "position": [
+            1.89653277,
+            -0.44106847,
+            1.8160466
+          ],
+          "right": [
+            1,
+            -3.86786051E-05,
+            6.458937E-07
+          ],
+          "up": [
+            3.86786051E-05,
+            1,
+            -7.969582E-07
+          ],
+          "forward": [
+            -6.458629E-07,
+            7.969832E-07,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "wing1a_R",
+          "position": [
+            1.89653277,
+            -0.44106847,
+            1.8160466
+          ],
+          "right": [
+            1,
+            -3.86786051E-05,
+            6.458937E-07
+          ],
+          "up": [
+            3.86786051E-05,
+            1,
+            -7.969582E-07
+          ],
+          "forward": [
+            -6.458629E-07,
+            7.969832E-07,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "wing2_R",
+      "pose": {
+        "path": "wing2_R",
+        "position": [
+          3.17570686,
+          -0.394909561,
+          0.97292763
+        ],
+        "right": [
+          1,
+          -0.00021775598,
+          4.43321233E-06
+        ],
+        "up": [
+          0.000217756038,
+          1,
+          -1.2916249E-05
+        ],
+        "forward": [
+          -4.43039926E-06,
+          1.29172149E-05,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=3.8",
+        "dragArea=0.12",
+        "streamlining=0.9",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=639.9844",
+        "collisionSize=(1.48838806,0.113121033,1.6907959)",
+        "rb->Rigidbody:wing2_R",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=10",
+        "armorProperties.blastArmor=60",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=4",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=30",
+        "impactDamage.multiplier=1",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=200",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "wing2_R/wing2_R_liftNormal",
+          "position": [
+            3.17570829,
+            -0.394922316,
+            0.0229381323
+          ],
+          "right": [
+            1,
+            -0.000217756853,
+            4.34646427E-06
+          ],
+          "up": [
+            0.000217529465,
+            0.9975631,
+            -0.0697693452
+          ],
+          "forward": [
+            1.08568784E-05,
+            0.0697693452,
+            0.9975631
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "wing2_R",
+          "position": [
+            3.17570686,
+            -0.394909561,
+            0.97292763
+          ],
+          "right": [
+            1,
+            -0.00021775598,
+            4.43321233E-06
+          ],
+          "up": [
+            0.000217756038,
+            1,
+            -1.2916249E-05
+          ],
+          "forward": [
+            -4.43039926E-06,
+            1.29172149E-05,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "wing2_R",
+          "position": [
+            3.17570686,
+            -0.394909561,
+            0.97292763
+          ],
+          "right": [
+            1,
+            -0.00021775598,
+            4.43321233E-06
+          ],
+          "up": [
+            0.000217756038,
+            1,
+            -1.2916249E-05
+          ],
+          "forward": [
+            -4.43039926E-06,
+            1.29172149E-05,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "wing2_R",
+          "position": [
+            3.17570686,
+            -0.394909561,
+            0.97292763
+          ],
+          "right": [
+            1,
+            -0.00021775598,
+            4.43321233E-06
+          ],
+          "up": [
+            0.000217756038,
+            1,
+            -1.2916249E-05
+          ],
+          "forward": [
+            -4.43039926E-06,
+            1.29172149E-05,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "wingtip_R",
+      "pose": {
+        "path": "wingtip_R",
+        "position": [
+          4.618304,
+          -0.3958914,
+          0.378038645
+        ],
+        "right": [
+          1,
+          -0.000234671839,
+          -5.6271947E-06
+        ],
+        "up": [
+          0.000234671781,
+          1,
+          -1.02576969E-05
+        ],
+        "forward": [
+          5.629602E-06,
+          1.02563763E-05,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=3.25",
+        "dragArea=0.065",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=485",
+        "collisionSize=(1.0932312,0.0842723846,1.16448975)",
+        "rb->Rigidbody:wingtip_R",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=40",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=4",
+        "armorProperties.blastTolerance=2.5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=300",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "wingtip_R",
+          "position": [
+            4.618304,
+            -0.3958914,
+            0.378038645
+          ],
+          "right": [
+            1,
+            -0.000234671839,
+            -5.6271947E-06
+          ],
+          "up": [
+            0.000234671781,
+            1,
+            -1.02576969E-05
+          ],
+          "forward": [
+            5.629602E-06,
+            1.02563763E-05,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "wingtip_R",
+          "position": [
+            4.618304,
+            -0.3958914,
+            0.378038645
+          ],
+          "right": [
+            1,
+            -0.000234671839,
+            -5.6271947E-06
+          ],
+          "up": [
+            0.000234671781,
+            1,
+            -1.02576969E-05
+          ],
+          "forward": [
+            5.629602E-06,
+            1.02563763E-05,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "wingtip_R",
+          "position": [
+            4.618304,
+            -0.3958914,
+            0.378038645
+          ],
+          "right": [
+            1,
+            -0.000234671839,
+            -5.6271947E-06
+          ],
+          "up": [
+            0.000234671781,
+            1,
+            -1.02576969E-05
+          ],
+          "forward": [
+            5.629602E-06,
+            1.02563763E-05,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "wingtip_R",
+          "position": [
+            4.618304,
+            -0.3958914,
+            0.378038645
+          ],
+          "right": [
+            1,
+            -0.000234671839,
+            -5.6271947E-06
+          ],
+          "up": [
+            0.000234671781,
+            1,
+            -1.02576969E-05
+          ],
+          "forward": [
+            5.629602E-06,
+            1.02563763E-05,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "aileron_R",
+      "pose": {
+        "path": "aileron_R",
+        "position": [
+          4.48852253,
+          -0.414275646,
+          -0.8915374
+        ],
+        "right": [
+          1,
+          -0.0002332196,
+          1.36490837E-06
+        ],
+        "up": [
+          0.000233219631,
+          1,
+          -1.15678431E-05
+        ],
+        "forward": [
+          -1.36221058E-06,
+          1.15681614E-05,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2",
+        "dragArea=0",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(1,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=400",
+        "collisionSize=(0.8757019,0.0750713348,0.700622559)",
+        "rb->Rigidbody:aileron_R",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=40",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=3",
+        "armorProperties.blastTolerance=2",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=5",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=400",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "aileron_R/aileron_R_visible",
+          "position": [
+            4.50052929,
+            -0.4052753,
+            -0.609537244
+          ],
+          "right": [
+            1,
+            -0.00023320895,
+            1.42616773E-06
+          ],
+          "up": [
+            0.000219634167,
+            0.939699769,
+            -0.3420004
+          ],
+          "forward": [
+            7.841736E-05,
+            0.3420004,
+            0.9396998
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "aileron_R",
+          "position": [
+            4.48852253,
+            -0.414275646,
+            -0.8915374
+          ],
+          "right": [
+            1,
+            -0.0002332196,
+            1.36490837E-06
+          ],
+          "up": [
+            0.000233219631,
+            1,
+            -1.15678431E-05
+          ],
+          "forward": [
+            -1.36221058E-06,
+            1.15681614E-05,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "aileron_R/aileron_R_visible",
+          "position": [
+            4.50052929,
+            -0.4052753,
+            -0.609537244
+          ],
+          "right": [
+            1,
+            -0.00023320895,
+            1.42616773E-06
+          ],
+          "up": [
+            0.000219634167,
+            0.939699769,
+            -0.3420004
+          ],
+          "forward": [
+            7.841736E-05,
+            0.3420004,
+            0.9396998
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "aileron_R",
+          "position": [
+            4.48852253,
+            -0.414275646,
+            -0.8915374
+          ],
+          "right": [
+            1,
+            -0.0002332196,
+            1.36490837E-06
+          ],
+          "up": [
+            0.000233219631,
+            1,
+            -1.15678431E-05
+          ],
+          "forward": [
+            -1.36221058E-06,
+            1.15681614E-05,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "flap_R",
+      "pose": {
+        "path": "flap_R",
+        "position": [
+          3.04438543,
+          -0.374425858,
+          -1.11766732
+        ],
+        "right": [
+          1,
+          -0.00017776528,
+          1.78145419E-05
+        ],
+        "up": [
+          0.000177765338,
+          1,
+          -3.1008185E-06
+        ],
+        "forward": [
+          -1.7813989E-05,
+          3.10398536E-06,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=1.4",
+        "dragArea=0",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=400",
+        "collisionSize=(0.849029541,0.105181694,0.715515137)",
+        "rb->Rigidbody:flap_R",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=10",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=3",
+        "armorProperties.blastTolerance=1",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=8",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=400",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "flap_R/flap_R_visible",
+          "position": [
+            2.96039581,
+            -0.385409683,
+            -0.7906792
+          ],
+          "right": [
+            1,
+            -0.00017776512,
+            1.78442788E-05
+          ],
+          "up": [
+            0.000168651051,
+            0.9063065,
+            -0.422621
+          ],
+          "forward": [
+            5.89548727E-05,
+            0.422621,
+            0.9063065
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "flap_R",
+          "position": [
+            3.04438543,
+            -0.374425858,
+            -1.11766732
+          ],
+          "right": [
+            1,
+            -0.00017776528,
+            1.78145419E-05
+          ],
+          "up": [
+            0.000177765338,
+            1,
+            -3.1008185E-06
+          ],
+          "forward": [
+            -1.7813989E-05,
+            3.10398536E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "flap_R/flap_R_visible",
+          "position": [
+            2.96039581,
+            -0.385409683,
+            -0.7906792
+          ],
+          "right": [
+            1,
+            -0.00017776512,
+            1.78442788E-05
+          ],
+          "up": [
+            0.000168651051,
+            0.9063065,
+            -0.422621
+          ],
+          "forward": [
+            5.89548727E-05,
+            0.422621,
+            0.9063065
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "flap_R",
+          "position": [
+            3.04438543,
+            -0.374425858,
+            -1.11766732
+          ],
+          "right": [
+            1,
+            -0.00017776528,
+            1.78145419E-05
+          ],
+          "up": [
+            0.000177765338,
+            1,
+            -3.1008185E-06
+          ],
+          "forward": [
+            -1.7813989E-05,
+            3.10398536E-06,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "intake_R",
+      "pose": {
+        "path": "intake_R",
+        "position": [
+          1.05758274,
+          -0.5973755,
+          5.11687851
+        ],
+        "right": [
+          1,
+          -3.943062E-06,
+          -8.7112E-06
+        ],
+        "up": [
+          3.94308654E-06,
+          1,
+          2.84179737E-06
+        ],
+        "forward": [
+          8.711189E-06,
+          -2.841832E-06,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=0.4",
+        "dragArea=0.040788",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=150",
+        "collisionSize=(1.197052,0.441878319,0.8449707)",
+        "rb->Rigidbody:intake_R",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=60",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=3",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=5",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=150",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "intake_R",
+          "position": [
+            1.05758274,
+            -0.5973755,
+            5.11687851
+          ],
+          "right": [
+            1,
+            -3.943062E-06,
+            -8.7112E-06
+          ],
+          "up": [
+            3.94308654E-06,
+            1,
+            2.84179737E-06
+          ],
+          "forward": [
+            8.711189E-06,
+            -2.841832E-06,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "intake_R",
+          "position": [
+            1.05758274,
+            -0.5973755,
+            5.11687851
+          ],
+          "right": [
+            1,
+            -3.943062E-06,
+            -8.7112E-06
+          ],
+          "up": [
+            3.94308654E-06,
+            1,
+            2.84179737E-06
+          ],
+          "forward": [
+            8.711189E-06,
+            -2.841832E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "intake_R",
+          "position": [
+            1.05758274,
+            -0.5973755,
+            5.11687851
+          ],
+          "right": [
+            1,
+            -3.943062E-06,
+            -8.7112E-06
+          ],
+          "up": [
+            3.94308654E-06,
+            1,
+            2.84179737E-06
+          ],
+          "forward": [
+            8.711189E-06,
+            -2.841832E-06,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "intake_R",
+          "position": [
+            1.05758274,
+            -0.5973755,
+            5.11687851
+          ],
+          "right": [
+            1,
+            -3.943062E-06,
+            -8.7112E-06
+          ],
+          "up": [
+            3.94308654E-06,
+            1,
+            2.84179737E-06
+          ],
+          "forward": [
+            8.711189E-06,
+            -2.841832E-06,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "wing1b_L",
+      "pose": {
+        "path": "wing1b_L",
+        "position": [
+          -1.74997067,
+          -0.4022171,
+          -1.46000886
+        ],
+        "right": [
+          1,
+          2.62599624E-05,
+          1.79319909E-06
+        ],
+        "up": [
+          -2.62599588E-05,
+          1,
+          -2.6122807E-06
+        ],
+        "forward": [
+          -1.79326776E-06,
+          2.6122334E-06,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2.5",
+        "dragArea=0.20394",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=624.96875",
+        "collisionSize=(1.65310669,0.471092224,1.659668)",
+        "rb->Rigidbody:wing1b_L",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=15",
+        "armorProperties.blastArmor=70",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=20",
+        "impactDamage.multiplier=1",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=225",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "wing1b_L",
+          "position": [
+            -1.74997067,
+            -0.4022171,
+            -1.46000886
+          ],
+          "right": [
+            1,
+            2.62599624E-05,
+            1.79319909E-06
+          ],
+          "up": [
+            -2.62599588E-05,
+            1,
+            -2.6122807E-06
+          ],
+          "forward": [
+            -1.79326776E-06,
+            2.6122334E-06,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "wing1b_L",
+          "position": [
+            -1.74997067,
+            -0.4022171,
+            -1.46000886
+          ],
+          "right": [
+            1,
+            2.62599624E-05,
+            1.79319909E-06
+          ],
+          "up": [
+            -2.62599588E-05,
+            1,
+            -2.6122807E-06
+          ],
+          "forward": [
+            -1.79326776E-06,
+            2.6122334E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "wing1b_L",
+          "position": [
+            -1.74997067,
+            -0.4022171,
+            -1.46000886
+          ],
+          "right": [
+            1,
+            2.62599624E-05,
+            1.79319909E-06
+          ],
+          "up": [
+            -2.62599588E-05,
+            1,
+            -2.6122807E-06
+          ],
+          "forward": [
+            -1.79326776E-06,
+            2.6122334E-06,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "wing1b_L",
+          "position": [
+            -1.74997067,
+            -0.4022171,
+            -1.46000886
+          ],
+          "right": [
+            1,
+            2.62599624E-05,
+            1.79319909E-06
+          ],
+          "up": [
+            -2.62599588E-05,
+            1,
+            -2.6122807E-06
+          ],
+          "forward": [
+            -1.79326776E-06,
+            2.6122334E-06,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "wing1b_R",
+      "pose": {
+        "path": "wing1b_R",
+        "position": [
+          1.7500298,
+          -0.402237743,
+          -1.47737408
+        ],
+        "right": [
+          1,
+          -5.792265E-06,
+          4.71385965E-06
+        ],
+        "up": [
+          5.792255E-06,
+          1,
+          2.19690469E-06
+        ],
+        "forward": [
+          -4.71387239E-06,
+          -2.1968774E-06,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2.5",
+        "dragArea=0.20394",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=624.96875",
+        "collisionSize=(1.97357178,0.471092224,1.22705078)",
+        "rb->Rigidbody:wing1b_R",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=15",
+        "armorProperties.blastArmor=70",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=20",
+        "impactDamage.multiplier=1",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=225",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "wing1b_R",
+          "position": [
+            1.7500298,
+            -0.402237743,
+            -1.47737408
+          ],
+          "right": [
+            1,
+            -5.792265E-06,
+            4.71385965E-06
+          ],
+          "up": [
+            5.792255E-06,
+            1,
+            2.19690469E-06
+          ],
+          "forward": [
+            -4.71387239E-06,
+            -2.1968774E-06,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "wing1b_R",
+          "position": [
+            1.7500298,
+            -0.402237743,
+            -1.47737408
+          ],
+          "right": [
+            1,
+            -5.792265E-06,
+            4.71385965E-06
+          ],
+          "up": [
+            5.792255E-06,
+            1,
+            2.19690469E-06
+          ],
+          "forward": [
+            -4.71387239E-06,
+            -2.1968774E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "wing1b_R",
+          "position": [
+            1.7500298,
+            -0.402237743,
+            -1.47737408
+          ],
+          "right": [
+            1,
+            -5.792265E-06,
+            4.71385965E-06
+          ],
+          "up": [
+            5.792255E-06,
+            1,
+            2.19690469E-06
+          ],
+          "forward": [
+            -4.71387239E-06,
+            -2.1968774E-06,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "wing1b_R",
+          "position": [
+            1.7500298,
+            -0.402237743,
+            -1.47737408
+          ],
+          "right": [
+            1,
+            -5.792265E-06,
+            4.71385965E-06
+          ],
+          "up": [
+            5.792255E-06,
+            1,
+            2.19690469E-06
+          ],
+          "forward": [
+            -4.71387239E-06,
+            -2.1968774E-06,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "weaponbay_L",
+      "pose": {
+        "path": "weaponbay_L",
+        "position": [
+          -0.7713686,
+          -0.8574887,
+          1.67152274
+        ],
+        "right": [
+          1,
+          2.62584254E-05,
+          1.84644875E-06
+        ],
+        "up": [
+          -2.62584217E-05,
+          1,
+          -2.61387981E-06
+        ],
+        "forward": [
+          -1.84651742E-06,
+          2.61383116E-06,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=0.7",
+        "dragArea=0.163152009",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=920",
+        "collisionSize=(2.02359,0.384842873,1.74902344)",
+        "rb->Rigidbody:weaponbay_L",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=60",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=3",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=600",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "weaponbay_L",
+          "position": [
+            -0.7713686,
+            -0.8574887,
+            1.67152274
+          ],
+          "right": [
+            1,
+            2.62584254E-05,
+            1.84644875E-06
+          ],
+          "up": [
+            -2.62584217E-05,
+            1,
+            -2.61387981E-06
+          ],
+          "forward": [
+            -1.84651742E-06,
+            2.61383116E-06,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "weaponbay_L",
+          "position": [
+            -0.7713686,
+            -0.8574887,
+            1.67152274
+          ],
+          "right": [
+            1,
+            2.62584254E-05,
+            1.84644875E-06
+          ],
+          "up": [
+            -2.62584217E-05,
+            1,
+            -2.61387981E-06
+          ],
+          "forward": [
+            -1.84651742E-06,
+            2.61383116E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "weaponbay_L",
+          "position": [
+            -0.7713686,
+            -0.8574887,
+            1.67152274
+          ],
+          "right": [
+            1,
+            2.62584254E-05,
+            1.84644875E-06
+          ],
+          "up": [
+            -2.62584217E-05,
+            1,
+            -2.61387981E-06
+          ],
+          "forward": [
+            -1.84651742E-06,
+            2.61383116E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[1]": {
+          "path": "weaponbay_L/weapondoor_L",
+          "position": [
+            -0.4760294,
+            -1.050251,
+            1.19092941
+          ],
+          "right": [
+            1,
+            2.62584254E-05,
+            1.84644875E-06
+          ],
+          "up": [
+            -2.62584217E-05,
+            1,
+            -2.61387981E-06
+          ],
+          "forward": [
+            -1.84651742E-06,
+            2.61383116E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[2]": {
+          "path": "weaponbay_L/weapondoor_LL",
+          "position": [
+            -1.35328269,
+            -0.8987854,
+            0.798758268
+          ],
+          "right": [
+            1,
+            2.62584254E-05,
+            1.84644875E-06
+          ],
+          "up": [
+            -2.62584217E-05,
+            1,
+            -2.61387981E-06
+          ],
+          "forward": [
+            -1.84651742E-06,
+            2.61383116E-06,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "weaponbay_L",
+          "position": [
+            -0.7713686,
+            -0.8574887,
+            1.67152274
+          ],
+          "right": [
+            1,
+            2.62584254E-05,
+            1.84644875E-06
+          ],
+          "up": [
+            -2.62584217E-05,
+            1,
+            -2.61387981E-06
+          ],
+          "forward": [
+            -1.84651742E-06,
+            2.61383116E-06,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "weaponbay_R",
+      "pose": {
+        "path": "weaponbay_R",
+        "position": [
+          0.7713538,
+          -0.8575322,
+          1.67151606
+        ],
+        "right": [
+          1,
+          -7.666544E-06,
+          -8.14446E-06
+        ],
+        "up": [
+          7.666542E-06,
+          1,
+          -2.92043069E-07
+        ],
+        "forward": [
+          8.144461E-06,
+          2.91980655E-07,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=0.7",
+        "dragArea=0.163152009",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=920",
+        "collisionSize=(2.073059,0.384841919,1.67980957)",
+        "rb->Rigidbody:weaponbay_R",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=60",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=5",
+        "armorProperties.blastTolerance=5",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=3",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=600",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "weaponbay_R",
+          "position": [
+            0.7713538,
+            -0.8575322,
+            1.67151606
+          ],
+          "right": [
+            1,
+            -7.666544E-06,
+            -8.14446E-06
+          ],
+          "up": [
+            7.666542E-06,
+            1,
+            -2.92043069E-07
+          ],
+          "forward": [
+            8.144461E-06,
+            2.91980655E-07,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "weaponbay_R",
+          "position": [
+            0.7713538,
+            -0.8575322,
+            1.67151606
+          ],
+          "right": [
+            1,
+            -7.666544E-06,
+            -8.14446E-06
+          ],
+          "up": [
+            7.666542E-06,
+            1,
+            -2.92043069E-07
+          ],
+          "forward": [
+            8.144461E-06,
+            2.91980655E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "weaponbay_R",
+          "position": [
+            0.7713538,
+            -0.8575322,
+            1.67151606
+          ],
+          "right": [
+            1,
+            -7.666544E-06,
+            -8.14446E-06
+          ],
+          "up": [
+            7.666542E-06,
+            1,
+            -2.92043069E-07
+          ],
+          "forward": [
+            8.144461E-06,
+            2.91980655E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[1]": {
+          "path": "weaponbay_R/weapondoor_R",
+          "position": [
+            0.475996315,
+            -1.03753,
+            1.19093835
+          ],
+          "right": [
+            1,
+            -7.666544E-06,
+            -8.14446E-06
+          ],
+          "up": [
+            7.666542E-06,
+            1,
+            -2.92043069E-07
+          ],
+          "forward": [
+            8.144461E-06,
+            2.91980655E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[2]": {
+          "path": "weaponbay_R/weapondoor_RR",
+          "position": [
+            1.35325265,
+            -0.898816,
+            0.7987747
+          ],
+          "right": [
+            1,
+            -7.666544E-06,
+            -8.14446E-06
+          ],
+          "up": [
+            7.666542E-06,
+            1,
+            -2.92043069E-07
+          ],
+          "forward": [
+            8.144461E-06,
+            2.91980655E-07,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "weaponbay_R",
+          "position": [
+            0.7713538,
+            -0.8575322,
+            1.67151606
+          ],
+          "right": [
+            1,
+            -7.666544E-06,
+            -8.14446E-06
+          ],
+          "up": [
+            7.666542E-06,
+            1,
+            -2.92043069E-07
+          ],
+          "forward": [
+            8.144461E-06,
+            2.91980655E-07,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "vstab1",
+      "pose": {
+        "path": "vstab1",
+        "position": [
+          -4.172325E-06,
+          1.42390311,
+          -2.05146646
+        ],
+        "right": [
+          1,
+          7.182397E-06,
+          -2.9472767E-06
+        ],
+        "up": [
+          -7.18239971E-06,
+          1,
+          -9.161444E-07
+        ],
+        "forward": [
+          2.94727033E-06,
+          9.16165561E-07,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=2",
+        "dragArea=0.0163152013",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=200",
+        "collisionSize=(1.19506836,0.519228935,0.9088135)",
+        "rb->Rigidbody:vstab1",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=50",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=4",
+        "armorProperties.blastTolerance=3",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=-100",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=200",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "vstab1/vstab1_liftnormal",
+          "position": [
+            9.834766E-06,
+            1.41124332,
+            -1.89016557
+          ],
+          "right": [
+            -7.39097959E-06,
+            1.00000036,
+            -9.152642E-07
+          ],
+          "up": [
+            -1.00000036,
+            -7.390977E-06,
+            2.92932646E-06
+          ],
+          "forward": [
+            2.92932E-06,
+            9.152849E-07,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "vstab1",
+          "position": [
+            -4.172325E-06,
+            1.42390311,
+            -2.05146646
+          ],
+          "right": [
+            1,
+            7.182397E-06,
+            -2.9472767E-06
+          ],
+          "up": [
+            -7.18239971E-06,
+            1,
+            -9.161444E-07
+          ],
+          "forward": [
+            2.94727033E-06,
+            9.16165561E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "vstab1",
+          "position": [
+            -4.172325E-06,
+            1.42390311,
+            -2.05146646
+          ],
+          "right": [
+            1,
+            7.182397E-06,
+            -2.9472767E-06
+          ],
+          "up": [
+            -7.18239971E-06,
+            1,
+            -9.161444E-07
+          ],
+          "forward": [
+            2.94727033E-06,
+            9.16165561E-07,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "vstab1",
+          "position": [
+            -4.172325E-06,
+            1.42390311,
+            -2.05146646
+          ],
+          "right": [
+            1,
+            7.182397E-06,
+            -2.9472767E-06
+          ],
+          "up": [
+            -7.18239971E-06,
+            1,
+            -9.161444E-07
+          ],
+          "forward": [
+            2.94727033E-06,
+            9.16165561E-07,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "vstab2",
+      "pose": {
+        "path": "vstab2",
+        "position": [
+          -4.99486923E-05,
+          2.40424728,
+          -2.73814654
+        ],
+        "right": [
+          1,
+          1.4742287E-05,
+          -3.59970181E-06
+        ],
+        "up": [
+          -1.47422852E-05,
+          1,
+          5.629514E-07
+        ],
+        "forward": [
+          3.59971E-06,
+          -5.628983E-07,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=1.5",
+        "dragArea=0",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=150",
+        "collisionSize=(0.680297852,0.4242487,0.517089844)",
+        "rb->Rigidbody:vstab2",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=50",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=3",
+        "armorProperties.blastTolerance=2",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=10",
+        "structuralThreshold=0",
+        "integrityThreshold=-100",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=1",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=150",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "vstab2/vstab2_liftnormal",
+          "position": [
+            -3.65972519E-05,
+            2.37724686,
+            -2.52114844
+          ],
+          "right": [
+            -1.50203732E-05,
+            1.00000036,
+            5.77129754E-07
+          ],
+          "up": [
+            -1.00000036,
+            -1.5020375E-05,
+            3.6428778E-06
+          ],
+          "forward": [
+            3.642886E-06,
+            -5.770763E-07,
+            1
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "vstab2",
+          "position": [
+            -4.99486923E-05,
+            2.40424728,
+            -2.73814654
+          ],
+          "right": [
+            1,
+            1.4742287E-05,
+            -3.59970181E-06
+          ],
+          "up": [
+            -1.47422852E-05,
+            1,
+            5.629514E-07
+          ],
+          "forward": [
+            3.59971E-06,
+            -5.628983E-07,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "vstab2",
+          "position": [
+            -4.99486923E-05,
+            2.40424728,
+            -2.73814654
+          ],
+          "right": [
+            1,
+            1.4742287E-05,
+            -3.59970181E-06
+          ],
+          "up": [
+            -1.47422852E-05,
+            1,
+            5.629514E-07
+          ],
+          "forward": [
+            3.59971E-06,
+            -5.628983E-07,
+            1
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "vstab2",
+          "position": [
+            -4.99486923E-05,
+            2.40424728,
+            -2.73814654
+          ],
+          "right": [
+            1,
+            1.4742287E-05,
+            -3.59970181E-06
+          ],
+          "up": [
+            -1.47422852E-05,
+            1,
+            5.629514E-07
+          ],
+          "forward": [
+            3.59971E-06,
+            -5.628983E-07,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "AeroPart",
+      "path": "rudder",
+      "pose": {
+        "path": "rudder",
+        "position": [
+          -6.341934E-05,
+          1.82955146,
+          -3.17968059
+        ],
+        "right": [
+          1,
+          7.51991649E-07,
+          1.07027188E-06
+        ],
+        "up": [
+          -7.519945E-07,
+          1,
+          2.68149529E-06
+        ],
+        "forward": [
+          -1.07026983E-06,
+          -2.6814962E-06,
+          1
+        ]
+      },
+      "fields": [
+        "movingJoints._size=0",
+        "movingJoints._version=0",
+        "wingArea=1.5",
+        "dragArea=0",
+        "streamlining=0",
+        "wingEffectiveness=1",
+        "centerOfLift=(0,0,0)",
+        "buoyancy=2",
+        "airflowChanneling=0",
+        "airfoil=1",
+        "airfoilID=9",
+        "submergedAmount=0",
+        "simplePhysics=False",
+        "criticalPart=False",
+        "parentUnit->Aircraft:",
+        "mass=150",
+        "collisionSize=(0.438034058,1.03212833,0.356994629)",
+        "rb->Rigidbody:rudder",
+        "velocity=(0,0,0)",
+        "fragmented=False",
+        "detachedFromUnit=False",
+        "hitPoints=100",
+        "armorProperties.pierceArmor=30",
+        "armorProperties.blastArmor=40",
+        "armorProperties.fireArmor=0",
+        "armorProperties.pierceTolerance=3",
+        "armorProperties.blastTolerance=2",
+        "armorProperties.fireTolerance=1",
+        "armorProperties.overpressureLimit=8",
+        "structuralThreshold=0",
+        "integrityThreshold=-1000000",
+        "impactDamage.threshold=0",
+        "impactDamage.multiplier=0",
+        "damageMaterial.threshold=50",
+        "damageMaterial.renderers._size=1",
+        "damageMaterial.renderers._version=0",
+        "damageEffects._size=0",
+        "damageEffects._version=0",
+        "hostedParticles._size=0",
+        "hostedParticles._version=0",
+        "baseMass=150",
+        "weaponDrag=0",
+        "weaponMass=0",
+        "fuelMass=0"
+      ],
+      "transforms": {
+        "liftNormal": {
+          "path": "rudder/rudder_visible/rudder_liftnormal",
+          "position": [
+            -0.122284174,
+            1.81949091,
+            -3.17087841
+          ],
+          "right": [
+            -8.7171793E-07,
+            0.9797966,
+            -0.199998021
+          ],
+          "up": [
+            -0.957998,
+            0.0573538,
+            0.280982256
+          ],
+          "forward": [
+            0.2867761,
+            0.1915978,
+            0.9386425
+          ]
+        },
+        "parentUnit": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "rb": {
+          "path": "rudder",
+          "position": [
+            -6.341934E-05,
+            1.82955146,
+            -3.17968059
+          ],
+          "right": [
+            1,
+            7.51991649E-07,
+            1.07027188E-06
+          ],
+          "up": [
+            -7.519945E-07,
+            1,
+            2.68149529E-06
+          ],
+          "forward": [
+            -1.07026983E-06,
+            -2.6814962E-06,
+            1
+          ]
+        },
+        "damageMaterial.renderers._items[0]": {
+          "path": "rudder/rudder_visible",
+          "position": [
+            -7.62939453E-05,
+            1.8855499,
+            -2.767677
+          ],
+          "right": [
+            -8.7171793E-07,
+            0.9797966,
+            -0.199998021
+          ],
+          "up": [
+            -0.957998,
+            0.0573538,
+            0.280982256
+          ],
+          "forward": [
+            0.2867761,
+            0.1915978,
+            0.9386425
+          ]
+        },
+        "<xform>k__BackingField": {
+          "path": "rudder",
+          "position": [
+            -6.341934E-05,
+            1.82955146,
+            -3.17968059
+          ],
+          "right": [
+            1,
+            7.51991649E-07,
+            1.07027188E-06
+          ],
+          "up": [
+            -7.519945E-07,
+            1,
+            2.68149529E-06
+          ],
+          "forward": [
+            -1.07026983E-06,
+            -2.6814962E-06,
+            1
+          ]
+        }
+      }
+    }
+  ],
+  "surfaces": [
+    {
+      "type": "ControlSurface",
+      "path": "canard_L",
+      "pose": {
+        "path": "canard_L",
+        "position": [
+          -2.139667,
+          0.09302119,
+          5.325095
+        ],
+        "right": [
+          1,
+          -6.483486E-05,
+          -9.333564E-07
+        ],
+        "up": [
+          6.483484E-05,
+          1,
+          -1.14075847E-05
+        ],
+        "forward": [
+          9.34096E-07,
+          1.14075247E-05,
+          1
+        ]
+      },
+      "fields": [
+        "pitchRange=35",
+        "rollRange=-5",
+        "yawRange=0",
+        "brakeRange=0",
+        "attachedSurface->AeroPart:canard_L",
+        "flap=False",
+        "servoSpeed=70",
+        "splitDrag=0",
+        "maxSplit=0",
+        "yawSplitFactor=0",
+        "splitVolumeMultiplier=0",
+        "maxVolumeSpeed=340",
+        "splitPitchMin=0.5",
+        "splitPitchMax=2",
+        "locked=False",
+        "aircraft->Aircraft:",
+        "splitAmount=0"
+      ],
+      "transforms": {
+        "attachedSurface": {
+          "path": "canard_L",
+          "position": [
+            -2.139667,
+            0.09302119,
+            5.325095
+          ],
+          "right": [
+            1,
+            -6.483486E-05,
+            -9.333564E-07
+          ],
+          "up": [
+            6.483484E-05,
+            1,
+            -1.14075847E-05
+          ],
+          "forward": [
+            9.34096E-07,
+            1.14075247E-05,
+            1
+          ]
+        },
+        "visibleMesh": {
+          "path": "canard_L/canard_L_visible",
+          "position": [
+            -1.52565145,
+            0.05798769,
+            5.895079
+          ],
+          "right": [
+            1,
+            -6.483361E-05,
+            -9.567349E-07
+          ],
+          "up": [
+            6.474988E-05,
+            0.9992716,
+            -0.03816218
+          ],
+          "forward": [
+            3.43023021E-06,
+            0.03816218,
+            0.9992716
+          ]
+        },
+        "aircraft": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "ControlSurface",
+      "path": "canard_R",
+      "pose": {
+        "path": "canard_R",
+        "position": [
+          2.13960838,
+          0.09284655,
+          5.32506847
+        ],
+        "right": [
+          1,
+          -1.46673449E-06,
+          -6.512164E-06
+        ],
+        "up": [
+          1.46673563E-06,
+          1,
+          1.58056679E-07
+        ],
+        "forward": [
+          6.512164E-06,
+          -1.58066229E-07,
+          1
+        ]
+      },
+      "fields": [
+        "pitchRange=35",
+        "rollRange=5",
+        "yawRange=0",
+        "brakeRange=0",
+        "attachedSurface->AeroPart:canard_R",
+        "flap=False",
+        "servoSpeed=70",
+        "splitDrag=0",
+        "maxSplit=0",
+        "yawSplitFactor=0",
+        "splitVolumeMultiplier=0",
+        "maxVolumeSpeed=340",
+        "splitPitchMin=0.5",
+        "splitPitchMax=2",
+        "locked=False",
+        "aircraft->Aircraft:",
+        "splitAmount=0"
+      ],
+      "transforms": {
+        "attachedSurface": {
+          "path": "canard_R",
+          "position": [
+            2.13960838,
+            0.09284655,
+            5.32506847
+          ],
+          "right": [
+            1,
+            -1.46673449E-06,
+            -6.512164E-06
+          ],
+          "up": [
+            1.46673563E-06,
+            1,
+            1.58056679E-07
+          ],
+          "forward": [
+            6.512164E-06,
+            -1.58066229E-07,
+            1
+          ]
+        },
+        "visibleMesh": {
+          "path": "canard_R/canard_R_visible",
+          "position": [
+            1.52563787,
+            0.05784712,
+            5.895059
+          ],
+          "right": [
+            1,
+            -1.47118385E-06,
+            -6.553227E-06
+          ],
+          "up": [
+            4.45180774E-07,
+            0.988087952,
+            -0.153890356
+          ],
+          "forward": [
+            6.701566E-06,
+            0.153890356,
+            0.988087952
+          ]
+        },
+        "aircraft": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "ControlSurface",
+      "path": "aileron_L",
+      "pose": {
+        "path": "aileron_L",
+        "position": [
+          -4.48852825,
+          -0.414047062,
+          -0.8915088
+        ],
+        "right": [
+          1,
+          0.00019844684,
+          6.49913864E-06
+        ],
+        "up": [
+          -0.000198446782,
+          1,
+          -1.10603332E-05
+        ],
+        "forward": [
+          -6.50133325E-06,
+          1.10590436E-05,
+          1
+        ]
+      },
+      "fields": [
+        "pitchRange=0",
+        "rollRange=-30",
+        "yawRange=0",
+        "brakeRange=0",
+        "attachedSurface->AeroPart:aileron_L",
+        "flap=False",
+        "servoSpeed=70",
+        "splitDrag=0",
+        "maxSplit=0",
+        "yawSplitFactor=0",
+        "splitVolumeMultiplier=0",
+        "maxVolumeSpeed=340",
+        "splitPitchMin=0.5",
+        "splitPitchMax=2",
+        "locked=False",
+        "aircraft->Aircraft:",
+        "splitAmount=0"
+      ],
+      "transforms": {
+        "attachedSurface": {
+          "path": "aileron_L",
+          "position": [
+            -4.48852825,
+            -0.414047062,
+            -0.8915088
+          ],
+          "right": [
+            1,
+            0.00019844684,
+            6.49913864E-06
+          ],
+          "up": [
+            -0.000198446782,
+            1,
+            -1.10603332E-05
+          ],
+          "forward": [
+            -6.50133325E-06,
+            1.10590436E-05,
+            1
+          ]
+        },
+        "visibleMesh": {
+          "path": "aileron_L/aileron_L_visible",
+          "position": [
+            -4.500548,
+            -0.405046016,
+            -0.6094973
+          ],
+          "right": [
+            1,
+            0.000198450041,
+            6.43734165E-06
+          ],
+          "up": [
+            -0.000188686434,
+            0.9397075,
+            0.341979116
+          ],
+          "forward": [
+            6.18165359E-05,
+            -0.341979116,
+            0.9397076
+          ]
+        },
+        "aircraft": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "ControlSurface",
+      "path": "aileron_R",
+      "pose": {
+        "path": "aileron_R",
+        "position": [
+          4.48852253,
+          -0.414275646,
+          -0.8915374
+        ],
+        "right": [
+          1,
+          -0.0002332196,
+          1.36490837E-06
+        ],
+        "up": [
+          0.000233219631,
+          1,
+          -1.15678431E-05
+        ],
+        "forward": [
+          -1.36221058E-06,
+          1.15681614E-05,
+          1
+        ]
+      },
+      "fields": [
+        "pitchRange=0",
+        "rollRange=30",
+        "yawRange=0",
+        "brakeRange=0",
+        "attachedSurface->AeroPart:aileron_R",
+        "flap=False",
+        "servoSpeed=70",
+        "splitDrag=0",
+        "maxSplit=0",
+        "yawSplitFactor=0",
+        "splitVolumeMultiplier=0",
+        "maxVolumeSpeed=340",
+        "splitPitchMin=0.5",
+        "splitPitchMax=2",
+        "locked=False",
+        "aircraft->Aircraft:",
+        "splitAmount=0"
+      ],
+      "transforms": {
+        "attachedSurface": {
+          "path": "aileron_R",
+          "position": [
+            4.48852253,
+            -0.414275646,
+            -0.8915374
+          ],
+          "right": [
+            1,
+            -0.0002332196,
+            1.36490837E-06
+          ],
+          "up": [
+            0.000233219631,
+            1,
+            -1.15678431E-05
+          ],
+          "forward": [
+            -1.36221058E-06,
+            1.15681614E-05,
+            1
+          ]
+        },
+        "visibleMesh": {
+          "path": "aileron_R/aileron_R_visible",
+          "position": [
+            4.50052929,
+            -0.4052753,
+            -0.609537244
+          ],
+          "right": [
+            1,
+            -0.00023320895,
+            1.42616773E-06
+          ],
+          "up": [
+            0.000219634167,
+            0.939699769,
+            -0.3420004
+          ],
+          "forward": [
+            7.841736E-05,
+            0.3420004,
+            0.9396998
+          ]
+        },
+        "aircraft": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "type": "ControlSurface",
+      "path": "rudder",
+      "pose": {
+        "path": "rudder",
+        "position": [
+          -6.341934E-05,
+          1.82955146,
+          -3.17968059
+        ],
+        "right": [
+          1,
+          7.51991649E-07,
+          1.07027188E-06
+        ],
+        "up": [
+          -7.519945E-07,
+          1,
+          2.68149529E-06
+        ],
+        "forward": [
+          -1.07026983E-06,
+          -2.6814962E-06,
+          1
+        ]
+      },
+      "fields": [
+        "pitchRange=0",
+        "rollRange=0",
+        "yawRange=-25",
+        "brakeRange=0",
+        "attachedSurface->AeroPart:rudder",
+        "flap=False",
+        "servoSpeed=70",
+        "splitDrag=0",
+        "maxSplit=0",
+        "yawSplitFactor=0",
+        "splitVolumeMultiplier=0",
+        "maxVolumeSpeed=340",
+        "splitPitchMin=0.5",
+        "splitPitchMax=2",
+        "locked=False",
+        "aircraft->Aircraft:",
+        "splitAmount=0"
+      ],
+      "transforms": {
+        "attachedSurface": {
+          "path": "rudder",
+          "position": [
+            -6.341934E-05,
+            1.82955146,
+            -3.17968059
+          ],
+          "right": [
+            1,
+            7.51991649E-07,
+            1.07027188E-06
+          ],
+          "up": [
+            -7.519945E-07,
+            1,
+            2.68149529E-06
+          ],
+          "forward": [
+            -1.07026983E-06,
+            -2.6814962E-06,
+            1
+          ]
+        },
+        "visibleMesh": {
+          "path": "rudder/rudder_visible",
+          "position": [
+            -7.62939453E-05,
+            1.8855499,
+            -2.767677
+          ],
+          "right": [
+            -8.7171793E-07,
+            0.9797966,
+            -0.199998021
+          ],
+          "up": [
+            -0.957998,
+            0.0573538,
+            0.280982256
+          ],
+          "forward": [
+            0.2867761,
+            0.1915978,
+            0.9386425
+          ]
+        },
+        "aircraft": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    }
+  ],
+  "engines": [
+    {
+      "type": "Turbojet",
+      "path": "",
+      "pose": {
+        "path": "",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "right": [
+          1,
+          0,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "forward": [
+          0,
+          0,
+          1
+        ]
+      },
+      "fields": [
+        "maxThrust=95000",
+        "nozzleAngles=(4.681516,0,0)",
+        "damageFactor=1",
+        "thrust=0",
+        "parasiticThrustLoss=0",
+        "engineFire=False",
+        "turbineAudio->AudioSource:",
+        "thrustVectoring=(15,15,0)",
+        "thrustVectoringGain=(2,1,4)",
+        "throttleRemap=(0,0.88)",
+        "thrustVectoringMaxAirspeed=250",
+        "minDensity=0.15",
+        "splitThrustFactor=0",
+        "altitudeThrust=curve(2 keys)",
+        "operable=True",
+        "rpm=403.333618",
+        "turbineMaxPitch=1.5",
+        "minRPM=1000",
+        "maxRPM=3000",
+        "maxSpeed=493",
+        "spoolRate=1500",
+        "startupRate=200",
+        "fuelConsumptionMin=0.25",
+        "fuelConsumptionMax=1.5",
+        "damageThreshold=50",
+        "failureMessage=ENGINE FIRE",
+        "lastFuelCheck=66.00593",
+        "thrustRatio=0",
+        "hasFuel=True",
+        "afterburnerOn=False",
+        "aircraft->Aircraft:",
+        "condition=1",
+        "outOfSoundCone=False"
+      ],
+      "transforms": {
+        "turbineAudio": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "nozzles[0]": {
+          "path": "tail/nozzle",
+          "position": [
+            1.29938126E-05,
+            -0.124478087,
+            -3.9578917
+          ],
+          "right": [
+            1,
+            2.3986473E-05,
+            1.67704229E-06
+          ],
+          "up": [
+            -2.40433237E-05,
+            0.9966634,
+            0.0816215
+          ],
+          "forward": [
+            2.86364582E-07,
+            -0.0816215,
+            0.9966634
+          ]
+        },
+        "vectoringTransforms[0]": {
+          "path": "tail/nozzle",
+          "position": [
+            1.29938126E-05,
+            -0.124478087,
+            -3.9578917
+          ],
+          "right": [
+            1,
+            2.3986473E-05,
+            1.67704229E-06
+          ],
+          "up": [
+            -2.40433237E-05,
+            0.9966634,
+            0.0816215
+          ],
+          "forward": [
+            2.86364582E-07,
+            -0.0816215,
+            0.9966634
+          ]
+        },
+        "criticalParts[0]": {
+          "path": "intake_L",
+          "position": [
+            -1.05755663,
+            -0.5973044,
+            5.1169014
+          ],
+          "right": [
+            1,
+            -6.75054544E-05,
+            -1.06509242E-05
+          ],
+          "up": [
+            6.750547E-05,
+            1,
+            1.803436E-06
+          ],
+          "forward": [
+            1.06508023E-05,
+            -1.804155E-06,
+            1
+          ]
+        },
+        "criticalParts[1]": {
+          "path": "intake_R",
+          "position": [
+            1.05758274,
+            -0.5973755,
+            5.11687851
+          ],
+          "right": [
+            1,
+            -3.943062E-06,
+            -8.7112E-06
+          ],
+          "up": [
+            3.94308654E-06,
+            1,
+            2.84179737E-06
+          ],
+          "forward": [
+            8.711189E-06,
+            -2.841832E-06,
+            1
+          ]
+        },
+        "criticalParts[2]": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        },
+        "criticalParts[3]": {
+          "path": "tail",
+          "position": [
+            3.528595E-05,
+            -0.259309024,
+            -3.74551535
+          ],
+          "right": [
+            1,
+            2.39848341E-05,
+            1.67456869E-06
+          ],
+          "up": [
+            -2.39848414E-05,
+            1,
+            4.497884E-06
+          ],
+          "forward": [
+            -1.67446092E-06,
+            -4.49792424E-06,
+            1
+          ]
+        },
+        "criticalParts[4]": {
+          "path": "fuselage",
+          "position": [
+            2.53915787E-05,
+            0.0432960652,
+            3.3374877
+          ],
+          "right": [
+            1,
+            -7.653089E-06,
+            -8.091402E-06
+          ],
+          "up": [
+            7.653087E-06,
+            1,
+            -2.956349E-07
+          ],
+          "forward": [
+            8.091404E-06,
+            2.95573E-07,
+            1
+          ]
+        },
+        "aircraft": {
+          "path": "",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "right": [
+            1,
+            0,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    }
+  ],
+  "other": [
+  ],
+  "controlsFilter": {
+    "type": "ControlsFilter",
+    "path": "cockpit",
+    "pose": {
+      "path": "cockpit",
+      "position": [
+        4.529953E-05,
+        -0.009618275,
+        7.17956924
+      ],
+      "right": [
+        1,
+        -3.3790584E-05,
+        -6.57842E-06
+      ],
+      "up": [
+        3.3790584E-05,
+        1,
+        -2.11260726E-07
+      ],
+      "forward": [
+        6.57842747E-06,
+        2.1103844E-07,
+        1
+      ]
+    },
+    "fields": [
+      "minSpeed=5",
+      "minAlt=0",
+      "flightAssistName=Stability Assist",
+      "flyByWire.Enabled=True",
+      "flyByWire.gLimitPositive=9",
+      "flyByWire.opacity=1",
+      "flyByWire.cornerSpeed=160",
+      "flyByWire.postStallManeuverSpeed=200",
+      "flyByWire.maxRollSpeed=300",
+      "flyByWire.takeoffSpeed=50",
+      "flyByWire.pidTransitionSpeed=160",
+      "flyByWire.maxPitchAngularVel=0.9",
+      "flyByWire.maxRollAngularVel=6",
+      "flyByWire.alphaLimiter=27",
+      "flyByWire.alphaLimiterStrength=0.1",
+      "flyByWire.pFactorFast=10",
+      "flyByWire.iFactor=0",
+      "flyByWire.dFactorFast=1",
+      "flyByWire.rollTrimRate=0.05",
+      "flyByWire.rollTrimLimit=0.1",
+      "flyByWire.yawTightness=4",
+      "flyByWire.yawWeathervaning=0",
+      "flyByWire.rollTightness=0.75",
+      "flyByWire.inputSmoothing=(0,0,0)",
+      "flyByWire.noseGear->LandingGear:cockpit/gearHinge_F/gear_F",
+      "flyByWire.pFactorSlow=0",
+      "flyByWire.dFactorSlow=0",
+      "flyByWire.inputSmoothingVel=(0,0,0)",
+      "flyByWire.inputsSmoothed=(0,0,0)",
+      "flyByWire.rawInputs=(0,0,0)",
+      "flyByWire.pPrev=0",
+      "flyByWire.i=0",
+      "flyByWire.pitchAdjuster=0",
+      "flyByWire.rollTrim=0",
+      "flyByWire.limitFactorSmoothed=0",
+      "flyByWire.remapFactor=0",
+      "flyByWire.targetPitchAngVel=0",
+      "flyByWire.pitchAngVel=0",
+      "autoHover.Enabled=False",
+      "autoHover.Active=False",
+      "autoHover.setFlightAssistOff=False",
+      "autoHover.customAxis1Position=0",
+      "autoHover.errorGain=0.1",
+      "autoHover.sensitivity=0",
+      "autoHover.hoverBaseThrottle=0.5",
+      "autoHover.climbSensitivity=8",
+      "autoHover.customAxisSlowDown=0",
+      "autoHover.correctionStrength=0.5",
+      "autoHover.maxSpeed=30",
+      "autoHover.attitudePIDFactors.PID=(0,0,0)",
+      "autoHover.altitudePIDFactors.PID=(0,0,0)",
+      "autoHover.lastShipCheck=0",
+      "autoHover.storedFlightAssistState=False",
+      "autoHover.throttleOverride=0",
+      "autoHover.surfaceVelocity=(0,0,0)",
+      "aimAssist.Enabled=False",
+      "aimAssist.correction=(0,0,0)",
+      "aimAssist.smoothedCorrection=(0,0,0)",
+      "aimAssist.correctionSmoothingVel=(0,0,0)",
+      "aimAssist.CCIPCorrection=(0,0,0)",
+      "aimAssist.CCIPCorrectionSmoothed=(0,0,0)",
+      "aimAssist.CCIPCorrectionVel=(0,0,0)",
+      "aimAssist.targetVector=(0,0,0)",
+      "aimAssist.ccipVector=(0,0,0)",
+      "aimAssist.targetVelPrev=(0,0,0)",
+      "aimAssist.targetAccelSmoothed=(0,0,0)",
+      "aimAssist.targetAccelSmoothingVel=(0,0,0)",
+      "aimAssist.lastSim=0",
+      "aimAssist.lastAimRequest=0",
+      "aimAssist.targetDist=0",
+      "aimAssist.targetSpeed=0",
+      "aimAssist.timeToTargetCorrection=0",
+      "aimAssist.pitchPID.PID=(0,0,0)",
+      "aimAssist.yawPID.PID=(0,0,0)",
+      "aimAssist.rollPID.PID=(0,0,0)",
+      "flightAssistDefault=True",
+      "ReverseThrust=False",
+      "autoHoverActive=False",
+      "aircraft->Aircraft:",
+      "gearDownSmoothed=0",
+      "gearDownSmoothingVel=0",
+      "landingSpeed=0"
+    ],
+    "transforms": {
+      "flyByWire.noseGear": {
+        "path": "cockpit/gearHinge_F/gear_F",
+        "position": [
+          3.361702E-05,
+          -0.327618062,
+          7.61457157
+        ],
+        "right": [
+          1,
+          -3.3790584E-05,
+          -6.57842E-06
+        ],
+        "up": [
+          3.3790584E-05,
+          1,
+          -2.11260726E-07
+        ],
+        "forward": [
+          6.57842747E-06,
+          2.1103844E-07,
+          1
+        ]
+      },
+      "aircraft": {
+        "path": "",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "right": [
+          1,
+          0,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "forward": [
+          0,
+          0,
+          1
+        ]
+      }
+    }
+  },
+  "aircraftParameters": [
+    "aircraftName=FS-12 Revoker",
+    "rankRequired=3",
+    "loadouts._size=2",
+    "loadouts._version=0",
+    "DefaultFuelLevel=1",
+    "liveries._size=4",
+    "liveries._version=0",
+    "AoAEffects.OnsetSpeed=30",
+    "AoAEffects.FullVolumeSpeed=200",
+    "AoAEffects.OnsetAlpha=5",
+    "AoAEffects.FullVolumeAlpha=45",
+    "AoAEffects.ShakeFactor=0.1",
+    "aircraftGLimit=9",
+    "PIDReferenceAirspeed=180",
+    "maxSpeed=600",
+    "takeoffSpeed=100",
+    "takeoffDistance=1200",
+    "verticalLanding=False",
+    "turningRadius=1500",
+    "cornerSpeed=180",
+    "approachSpeed=60",
+    "landingSpeed=100",
+    "shortLandingSpeed=100",
+    "cruiseThrottle=0.99",
+    "minimumRadarAlt=50",
+    "levelBias=0.15",
+    "hoverTiltFactor=1",
+    "collectivePID=(0,0,0)",
+    "hoverPID=(0,0,0)",
+    "tiltPID=(0,0,0)",
+    "groundTurningRadius=12"
+  ],
+  "airfoils": [
+    {
+      "index": 0,
+      "name": "Fighter1_canards",
+      "lift": [
+        0.010509165,
+        0.102315255,
+        0.188365951,
+        0.268643081,
+        0.34312734,
+        0.4118005,
+        0.4746441,
+        0.531639755,
+        0.58276844,
+        0.6280118,
+        0.667351365,
+        0.7007686,
+        0.72824496,
+        0.749761641,
+        0.7653004,
+        0.7748424,
+        0.778369248,
+        0.7758624,
+        0.7673032,
+        0.7526732,
+        0.731954,
+        0.7051265,
+        0.6721728,
+        0.633073866,
+        0.5878115,
+        0.5363666,
+        0.4787213,
+        0.414856464,
+        0.344753742,
+        0.268394828,
+        0.185760915,
+        0.09683352,
+        0.00159404706,
+        -0.09623072,
+        -0.192248613,
+        -0.28583917,
+        -0.376383841,
+        -0.463263124,
+        -0.545858443,
+        -0.6235504,
+        -0.6957204,
+        -0.7617489,
+        -0.821017265,
+        -0.872906566,
+        -0.916797459,
+        -0.9520711,
+        -0.978108466,
+        -0.9942906,
+        -0.9999983,
+        -0.997287154,
+        -0.98955375,
+        -0.9780748,
+        -0.9641268,
+        -0.9489865,
+        -0.9339303,
+        -0.9202349,
+        -0.9091768,
+        -0.9020327,
+        -0.899784267,
+        -0.8743076,
+        -0.8039018,
+        -0.684917569,
+        -0.5137055,
+        -0.2866162,
+        0,
+        0.286625266,
+        0.5137351,
+        0.6849682,
+        0.803962946,
+        0.8743578,
+        0.89979136,
+        0.9020484,
+        0.9093534,
+        0.920661449,
+        0.934631467,
+        0.949922,
+        0.965191841,
+        0.979099751,
+        0.9903043,
+        0.9974643,
+        0.9992382,
+        0.9919689,
+        0.9735223,
+        0.944714248,
+        0.9063606,
+        0.8592775,
+        0.8042805,
+        0.74218595,
+        0.6738095,
+        0.599967,
+        0.5214746,
+        0.439148,
+        0.353803337,
+        0.266256273,
+        0.177322984,
+        0.0878191,
+        -0.00143858057,
+        -0.0884095654,
+        -0.17155993,
+        -0.250709862,
+        -0.3256804,
+        -0.396291763,
+        -0.4623649,
+        -0.523720145,
+        -0.5801783,
+        -0.6315599,
+        -0.67768544,
+        -0.718375742,
+        -0.7534516,
+        -0.782733,
+        -0.806041062,
+        -0.8231962,
+        -0.8340192,
+        -0.8383305,
+        -0.8359507,
+        -0.8267005,
+        -0.810400546,
+        -0.7868712,
+        -0.7559334,
+        -0.7174077,
+        -0.6711146,
+        -0.616874933,
+        -0.5545085,
+        -0.483837157,
+        -0.40468052,
+        -0.316859841,
+        -0.220195115,
+        -0.11450772
+      ],
+      "drag": [
+        0.099999994,
+        0.103673548,
+        0.115644172,
+        0.135258347,
+        0.161862254,
+        0.194802329,
+        0.233424932,
+        0.277076662,
+        0.325103462,
+        0.376851857,
+        0.431668252,
+        0.488899022,
+        0.547890842,
+        0.6079894,
+        0.6685415,
+        0.7288933,
+        0.788391531,
+        0.8463822,
+        0.9022116,
+        0.9552263,
+        1.00477266,
+        1.05019724,
+        1.090846,
+        1.12606549,
+        1.15520215,
+        1.17760217,
+        1.19261193,
+        1.199578,
+        1.19988978,
+        1.19977307,
+        1.19970655,
+        1.199682,
+        1.199691,
+        1.19972563,
+        1.19977736,
+        1.199838,
+        1.19989955,
+        1.19995344,
+        1.19999146,
+        1.20000565,
+        1.19891429,
+        1.188954,
+        1.16927338,
+        1.140718,
+        1.10413289,
+        1.06036329,
+        1.01025474,
+        0.9546523,
+        0.8944013,
+        0.830347061,
+        0.7633348,
+        0.694209754,
+        0.623817265,
+        0.5530027,
+        0.482611179,
+        0.413487852,
+        0.346478283,
+        0.2824275,
+        0.222180963,
+        0.1665839,
+        0.116483532,
+        0.07339583,
+        0.0397309735,
+        0.0178215131,
+        0.01,
+        0.01856881,
+        0.04174789,
+        0.07574621,
+        0.116772771,
+        0.163181484,
+        0.215813667,
+        0.27377668,
+        0.33616662,
+        0.402079552,
+        0.4706116,
+        0.5408588,
+        0.6119173,
+        0.682883263,
+        0.752852738,
+        0.820921957,
+        0.8861867,
+        0.9477435,
+        1.004688,
+        1.0561167,
+        1.10112548,
+        1.13881052,
+        1.168268,
+        1.18859375,
+        1.19888425,
+        1.2,
+        1.2,
+        1.2,
+        1.20000017,
+        1.20000017,
+        1.20000017,
+        1.20000017,
+        1.20000017,
+        1.20000017,
+        1.20000017,
+        1.20000017,
+        1.2,
+        1.19942212,
+        1.19089425,
+        1.172842,
+        1.14612281,
+        1.11159432,
+        1.0701139,
+        1.022539,
+        0.9697269,
+        0.912535548,
+        0.851822257,
+        0.78844434,
+        0.7232593,
+        0.65712446,
+        0.590897858,
+        0.5254365,
+        0.461598039,
+        0.400239646,
+        0.342219353,
+        0.2883944,
+        0.239622,
+        0.196759939,
+        0.160665512,
+        0.1321963,
+        0.112209678,
+        0.101563454,
+        0.1,
+        0.1
+      ]
+    },
+    {
+      "index": 1,
+      "name": "Fighter1_wing",
+      "lift": [
+        0.010509165,
+        0.102315255,
+        0.188365951,
+        0.268643081,
+        0.34312734,
+        0.4118005,
+        0.4746441,
+        0.531639755,
+        0.58276844,
+        0.6280118,
+        0.667351365,
+        0.7007686,
+        0.72824496,
+        0.749761641,
+        0.7653004,
+        0.7748424,
+        0.778369248,
+        0.7758624,
+        0.7673032,
+        0.7526732,
+        0.731954,
+        0.7051265,
+        0.6721728,
+        0.633073866,
+        0.5878115,
+        0.5363666,
+        0.4787213,
+        0.414856464,
+        0.344753742,
+        0.268394828,
+        0.185760915,
+        0.09683352,
+        0.00159404706,
+        -0.0973195359,
+        -0.196483418,
+        -0.294983983,
+        -0.3919093,
+        -0.486346453,
+        -0.577383459,
+        -0.6641075,
+        -0.745606542,
+        -0.8209677,
+        -0.8892788,
+        -0.9496276,
+        -1.00110126,
+        -1.04278767,
+        -1.07377422,
+        -1.09314871,
+        -1.09999824,
+        -1.09589815,
+        -1.0843538,
+        -1.06724906,
+        -1.0464679,
+        -1.02389419,
+        -1.00141168,
+        -0.9809042,
+        -0.9642557,
+        -0.953349948,
+        -0.949338138,
+        -0.889085054,
+        -0.751323164,
+        -0.564793169,
+        -0.3582356,
+        -0.160391033,
+        0,
+        0.160370424,
+        0.358169228,
+        0.5646801,
+        0.751186669,
+        0.888972759,
+        0.9493219,
+        0.953543663,
+        0.964774132,
+        0.981802,
+        1.00268281,
+        1.025472,
+        1.04822528,
+        1.0689981,
+        1.085846,
+        1.09682453,
+        1.09998894,
+        1.09156919,
+        1.06990623,
+        1.03611183,
+        0.9912973,
+        0.936574459,
+        0.873054445,
+        0.801849246,
+        0.724070132,
+        0.64082855,
+        0.5532363,
+        0.4624046,
+        0.369445384,
+        0.275469661,
+        0.181589544,
+        0.0889159441,
+        -0.00143858057,
+        -0.0884095654,
+        -0.17155993,
+        -0.250709862,
+        -0.3256804,
+        -0.396291763,
+        -0.4623649,
+        -0.523720145,
+        -0.5801783,
+        -0.6315599,
+        -0.67768544,
+        -0.718375742,
+        -0.7534516,
+        -0.782733,
+        -0.806041062,
+        -0.8231962,
+        -0.8340192,
+        -0.8383305,
+        -0.8359507,
+        -0.8267005,
+        -0.810400546,
+        -0.7868712,
+        -0.7559334,
+        -0.7174077,
+        -0.6711146,
+        -0.616874933,
+        -0.5545085,
+        -0.483837157,
+        -0.40468052,
+        -0.316859841,
+        -0.220195115,
+        -0.11450772
+      ],
+      "drag": [
+        0.099999994,
+        0.107296616,
+        0.129659414,
+        0.165719658,
+        0.214108,
+        0.27345562,
+        0.3423936,
+        0.4195533,
+        0.5035651,
+        0.593060255,
+        0.686669946,
+        0.7830251,
+        0.8807573,
+        0.9784965,
+        1.07487452,
+        1.168522,
+        1.25807071,
+        1.34215069,
+        1.4193933,
+        1.48842978,
+        1.54847383,
+        1.60036063,
+        1.64468849,
+        1.68203843,
+        1.712991,
+        1.73812723,
+        1.75802767,
+        1.77327311,
+        1.78444409,
+        1.79212165,
+        1.79688632,
+        1.79931891,
+        1.80000007,
+        1.7923975,
+        1.76999235,
+        1.734101,
+        1.68604183,
+        1.62713325,
+        1.55869341,
+        1.482041,
+        1.39849377,
+        1.30937088,
+        1.21599007,
+        1.11966968,
+        1.02172852,
+        0.923484445,
+        0.826256,
+        0.7313616,
+        0.640119433,
+        0.553848,
+        0.473865628,
+        0.4014907,
+        0.338041425,
+        0.284836173,
+        0.243095577,
+        0.209791377,
+        0.181791157,
+        0.157506973,
+        0.135351,
+        0.113735259,
+        0.0910718739,
+        0.0657729357,
+        0.0376622975,
+        0.0174156278,
+        0.01,
+        0.0170468427,
+        0.03720829,
+        0.06631037,
+        0.09128617,
+        0.112541065,
+        0.132337257,
+        0.15293701,
+        0.176602513,
+        0.205595985,
+        0.242179662,
+        0.288766354,
+        0.345986545,
+        0.412615538,
+        0.4874006,
+        0.569088757,
+        0.6564273,
+        0.748163462,
+        0.8430443,
+        0.939817,
+        1.03722882,
+        1.134027,
+        1.22895873,
+        1.32077086,
+        1.408211,
+        1.49002635,
+        1.56496358,
+        1.63177061,
+        1.68919408,
+        1.73598123,
+        1.77087951,
+        1.79263592,
+        1.8,
+        1.799704,
+        1.798307,
+        1.79502976,
+        1.789093,
+        1.77971792,
+        1.76612508,
+        1.74753535,
+        1.7231698,
+        1.69224906,
+        1.6539942,
+        1.60762584,
+        1.55236483,
+        1.48737872,
+        1.410462,
+        1.32233429,
+        1.22512364,
+        1.120958,
+        1.01196635,
+        0.900276661,
+        0.7880171,
+        0.6773153,
+        0.5703008,
+        0.469101071,
+        0.375844479,
+        0.2926594,
+        0.221673489,
+        0.165015936,
+        0.124814272,
+        0.103197217,
+        0.1,
+        0.1
+      ]
+    }
+  ]
+}

@@ -99,6 +99,7 @@ namespace AutopilotMod
         public ConfigEntry<float> MfdX;
         public ConfigEntry<float> MfdY;
         public ConfigEntry<bool> ShowDebug;
+        public ConfigEntry<bool> ExportAirframes;
         public ConfigEntry<float> RadarSize;
         public ConfigEntry<float> RadarX;
         public ConfigEntry<float> RadarY;
@@ -228,6 +229,8 @@ namespace AutopilotMod
             GunHeatX = cfg.Bind(D, "GunHeatPositionX", 0.985f, "Gun-heat display horizontal position (0 = left edge, 1 = right edge). Updated when you drag it.");
             GunHeatY = cfg.Bind(D, "GunHeatPositionY", 0.45f, "Gun-heat display vertical position (0 = top, 1 = bottom). Updated when you drag it.");
             ShowDebug = cfg.Bind(D, "ShowDebugLine", false, "Show commanded vs actual rates and raw stick outputs on the MFD (useful when tuning).");
+
+            ExportAirframes = cfg.Bind("FlyByWire", "ExportAirframes", false, "Development: 2 s after you start flying a jet, write its rigidbodies, aero parts, control surfaces, engines, stock fly-by-wire settings and airfoil charts to BepInEx\\FbwAirframes\\<aircraft>.json (once per spawn). Used to build and check the fly-by-wire's airframe models.");
 
             const string M = "WebMirror";
             MirrorEnabled = cfg.Bind(M, "Enabled", false, "Serve the MFDs as a web page on your local network (open http://<this PC's IP>:<Port> on another computer). Anyone on the network who opens it can press the MFD buttons. Windows Firewall asks once to allow it.");

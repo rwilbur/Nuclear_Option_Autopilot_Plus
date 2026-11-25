@@ -26,6 +26,7 @@ namespace AutopilotMod
         private MfdPage mfd;
         private RadarCoveragePage radarPage;
         private GunHeatPage gunHeat;
+        private Fbw.AirframeExport airframeExport;
         private WebMirror mirror;
         private DisconnectTone tone;
         private Harmony harmony;
@@ -55,6 +56,7 @@ namespace AutopilotMod
             mfd = new MfdPage(cfg, ap, gpws);
             radarPage = new RadarCoveragePage(cfg, ap) { Report = Report };
             gunHeat = new GunHeatPage(cfg, Logger);
+            airframeExport = new Fbw.AirframeExport(cfg.ExportAirframes, Logger);
             mirror = new WebMirror(cfg, Logger, Report, ap, mfd, radarPage, gunHeat);
             FlightPlanner.Init(Logger, cfg);
             ap.ApDisconnected += () =>
@@ -156,6 +158,7 @@ namespace AutopilotMod
                 if (FlightController.FbwNumbers(aircraft, out float gLimit, out float corner, out float roll))
                     FlightPlanner.RecordAirframe(aircraft.definition.unitName, gLimit, corner, roll);
             }
+            airframeExport.Tick(aircraft);
             UpdateHold();
             long t = Perf.Now;
             radarPage.Tick(aircraft, radarPage.Visible || mirror.Watching(1));
