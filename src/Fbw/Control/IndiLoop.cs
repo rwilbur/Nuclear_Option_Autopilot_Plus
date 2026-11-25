@@ -22,8 +22,9 @@ namespace AutopilotMod.Fbw.Control
         public float FilterTau = 0.04f;                   // s, on the measured acceleration and on the positions
         public float IncrementGain = 0.7f;                // share of the missing acceleration asked for per tick: < 1 for margin against delay and model error
         public float Reg = 1e-2f;                         // pull toward neutral with spare freedom, relative to each effector's own (weighted) effect
-        public float Damp = 0.05f;                        // cost of moving this tick, likewise: damps tick-to-tick trading between effectors
-        public float Idle = 0.02f;                        // an effector with less than this share of the strongest one's (weighted, squared) effect holds still
+        public float Damp = 1f;                           // cost of moving this tick, likewise: damps tick-to-tick trading between near-twin effectors
+                                                          // (bench 25 Nov: 0.05 let the Compass and Ifrit trade surfaces every tick; 1 keeps tracking and stops it)
+        public float Idle = 0.1f;                         // an effector under this share of the strongest one's effect, on every axis, holds still
 
         /// <summary>
         /// Axis priority when the effectors can't give everything: what yields first. Roll gives way to yaw
@@ -73,16 +74,23 @@ namespace AutopilotMod.Fbw.Control
 
             Allocator a = Alloc;
             a.Count = count;
-            // an effector that barely acts right now (near stall, or flow it no longer turns) holds still: the
-            // linearisation says little about it, and its position would just follow round-off
-            float strongest = 0f;
-            for (int j = 0; j < count; j++) strongest = Math.Max(strongest, Weighted(a, j));
-            // costs scale with each effector's own weighted effect, so they mean the same on every axis
+            // An effector that barely acts on every axis right now (near stall, or flow it no longer turns) holds still:
+            // the linearisation says little about it and its position would follow round-off. Per axis, against the
+            // strongest effector on that axis: a single weighted total let a thrust-vectoring nozzle at low speed (huge
+            // pitch, pitch weighted 100) idle every surface, roll included (flight logs, Vortex and Ifrit, 25 Nov).
+            float s0 = 0f, s1 = 0f, s2 = 0f;
+            for (int j = 0; j < count; j++)
+            {
+                s0 = Math.Max(s0, Math.Abs(a.B[3 * j]));
+                s1 = Math.Max(s1, Math.Abs(a.B[3 * j + 1]));
+                s2 = Math.Max(s2, Math.Abs(a.B[3 * j + 2]));
+            }
+            // costs scale with each effector's own weighted effect, so they mean the same at every dynamic pressure
             for (int j = 0; j < count; j++)
             {
                 a.U[j] = uf[j];
                 float b2 = Weighted(a, j);
-                bool idle = b2 < Idle * strongest;
+                bool idle = Weak(a.B[3 * j], s0) && Weak(a.B[3 * j + 1], s1) && Weak(a.B[3 * j + 2], s2);
                 float lo = idle ? position[j] : reachLo[j], hi = idle ? position[j] : Math.Max(reachHi[j], reachLo[j]);
                 a.Lo[j] = lo - uf[j];
                 a.Hi[j] = hi - uf[j];
@@ -98,6 +106,8 @@ namespace AutopilotMod.Fbw.Control
             UnmetYaw = dvR - gr;
             for (int j = 0; j < count; j++) Command[j] = uf[j] + a.Du[j];
         }
+
+        private bool Weak(float b, float strongest) => strongest <= 0f || Math.Abs(b) < Idle * strongest;
 
         private static float Weighted(Allocator a, int j) =>
             a.W[0] * a.B[3 * j] * a.B[3 * j] + a.W[1] * a.B[3 * j + 1] * a.B[3 * j + 1] + a.W[2] * a.B[3 * j + 2] * a.B[3 * j + 2];
