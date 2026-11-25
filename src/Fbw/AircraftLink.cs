@@ -25,9 +25,16 @@ namespace AutopilotMod.Fbw
         public readonly Aircraft Aircraft;
         public readonly List<SurfaceLink> Surfaces = new List<SurfaceLink>();
         public readonly List<EngineLink> Engines = new List<EngineLink>();
+        public readonly List<AeroPart> AeroParts;
+
+        /// <summary>The game's aero data (charts, air), loaded at bind.</summary>
+        public readonly GameAero Aero;
 
         private readonly ControlInputs shared;
         private readonly HashSet<Rigidbody> seenBodies = new HashSet<Rigidbody>();
+
+        /// <summary>Mass, CG and inertia (world axes, about the CG) of the attached parts, as of the last <see cref="Sample"/>.</summary>
+        public readonly Model.MassProps Mass = new Model.MassProps();
         private bool havePrev;
         private Vector3 omegaPrev, vCgPrev;
 
@@ -42,6 +49,8 @@ namespace AutopilotMod.Fbw
                 EngineLink e = EngineLink.TryCreate(m, shared);
                 if (e != null) Engines.Add(e);
             }
+            AeroParts = Find<AeroPart>(aircraft);
+            Aero = new GameAero();
         }
 
         /// <summary>The aircraft's shared inputs: the pilot's (filtered) command, and what other players' copies replay.</summary>
@@ -76,29 +85,28 @@ namespace AutopilotMod.Fbw
         {
             var s = new AirframeState { Time = UnityEngine.Time.time, Dt = dt, Speed = Aircraft.speed, Rho = Aircraft.airDensity };
 
-            // mass, CG and CG velocity over the attached parts (each is its own rigidbody under complex physics)
-            float m = 0f;
-            Vector3 mc = Vector3.zero, mv = Vector3.zero;
+            // mass, CG, inertia and CG velocity over the attached parts (each is its own rigidbody under complex physics)
+            Mass.Clear();
+            Vector3 mv = Vector3.zero;
             seenBodies.Clear();
             foreach (UnitPart p in Aircraft.GetAllParts())
             {
                 if (p == null || p.IsDetached()) continue;
                 Rigidbody rb = p.rb;
                 if (rb == null || !seenBodies.Add(rb)) continue;
-                m += rb.mass;
-                mc += rb.mass * rb.worldCenterOfMass;
+                Mass.Add(rb.mass, GameAero.V(rb.worldCenterOfMass), GameAero.V(rb.inertiaTensor), GameAero.Q(rb.rotation * rb.inertiaTensorRotation));
                 mv += rb.mass * rb.velocity;
             }
             Rigidbody root = Aircraft.rb;
-            if (m <= 0f)
+            if (seenBodies.Count == 0)
             {
-                m = root.mass;
-                mc = m * root.worldCenterOfMass;
-                mv = m * root.velocity;
+                Mass.Add(root.mass, GameAero.V(root.worldCenterOfMass), GameAero.V(root.inertiaTensor), GameAero.Q(root.rotation * root.inertiaTensorRotation));
+                mv = root.mass * root.velocity;
             }
-            s.Mass = m;
-            s.Cg = mc / m;
-            Vector3 vCg = mv / m;
+            Mass.Finish();
+            s.Mass = Mass.Mass;
+            s.Cg = GameAero.U(Mass.Cg);
+            Vector3 vCg = mv / Mass.Mass;
             s.VCg = vCg - Aircraft.GetWindVelocity();
 
             Transform t = root.transform;

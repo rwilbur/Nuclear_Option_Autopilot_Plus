@@ -1,5 +1,6 @@
 using HarmonyLib;
 using NuclearOption.Jobs;
+using UnityEngine;
 
 namespace AutopilotMod.Fbw
 {
@@ -15,6 +16,12 @@ namespace AutopilotMod.Fbw
             AccessTools.FieldRefAccess<ControlSurface, ControlInputs>("controlInputs");
         private static readonly AccessTools.FieldRef<ControlSurface, PtrAllocation<ControlSurfaceFields>> JobRef =
             AccessTools.FieldRefAccess<ControlSurface, PtrAllocation<ControlSurfaceFields>>("JobFields");
+        private static readonly AccessTools.FieldRef<ControlSurface, UnitPart> AttachedRef =
+            AccessTools.FieldRefAccess<ControlSurface, UnitPart>("attachedSurface");
+        private static readonly AccessTools.FieldRef<ControlSurface, GameObject> MeshRef =
+            AccessTools.FieldRefAccess<ControlSurface, GameObject>("visibleMesh");
+        private static readonly AccessTools.FieldRef<ControlSurface, bool> LockedRef =
+            AccessTools.FieldRefAccess<ControlSurface, bool>("locked");
 
         public readonly ControlSurface Surface;
         public readonly string Name;
@@ -31,7 +38,19 @@ namespace AutopilotMod.Fbw
             Surface = surface;
             Name = surface.name;
             this.shared = shared;
+            Part = AttachedRef(surface) as AeroPart;
+            GameObject mesh = MeshRef(surface);
+            Hinge = mesh != null ? mesh.transform : null;
         }
+
+        /// <summary>The aero part whose plate this surface turns.</summary>
+        public readonly AeroPart Part;
+
+        /// <summary>The visible mesh the job rotates: its right axis is the hinge (positive deflection turns about +x).</summary>
+        public readonly Transform Hinge;
+
+        /// <summary>The game has locked the surface (its job then reads zero inputs).</summary>
+        public bool Locked => Alive && LockedRef(Surface);
 
         /// <summary>False once Unity has destroyed the surface.</summary>
         public bool Alive => Surface != null;
@@ -83,6 +102,21 @@ namespace AutopilotMod.Fbw
         }
 
         public float Split => Job.splitAmount;
+
+        public float MaxSplit => Job.maxSplit;
+
+        /// <summary>A flap: driven by the gear, not the inputs.</summary>
+        public bool Flap => Job.flap;
+
+        public float Servo => Job.servoSpeed;
+
+        /// <summary>Per channel (pitch, roll, yaw): range and position (deg), into caller-owned arrays.</summary>
+        public void ReadChannels(float[] range, float[] current)
+        {
+            ref ControlSurfaceFields f = ref Job;
+            range[0] = f.pitchRange; range[1] = f.rollRange; range[2] = f.yawRange;
+            current[0] = f.currentPitch; current[1] = f.currentRoll; current[2] = f.currentYaw;
+        }
 
         /// <summary>The job's three channel positions (deg), for a surface with no link (the exporter). False before the job exists.</summary>
         public static bool Channels(ControlSurface cs, out float pitch, out float roll, out float yaw)

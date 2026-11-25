@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using AutopilotMod.Fbw.Model;
 using BepInEx.Logging;
-using HarmonyLib;
 using NuclearOption.Jobs;
 using UnityEngine;
 
@@ -19,22 +18,12 @@ namespace AutopilotMod.Fbw
     /// </summary>
     internal sealed class AeroCheck
     {
-        private static readonly AccessTools.FieldRef<JobManager, AeroJobSettings> AeroJob =
-            AccessTools.FieldRefAccess<JobManager, AeroJobSettings>("aeroJob");
-        private static readonly AccessTools.FieldRef<AeroPart, PtrAllocation<AeroPartFields>> PartJob =
-            AccessTools.FieldRefAccess<AeroPart, PtrAllocation<AeroPartFields>>("JobFields");
-        private static readonly AccessTools.FieldRef<Turbojet, JetNozzle[]> JetNozzles = AccessTools.FieldRefAccess<Turbojet, JetNozzle[]>("nozzles");
-        private static readonly AccessTools.FieldRef<Turbofan, JetNozzle[]> FanNozzles = AccessTools.FieldRefAccess<Turbofan, JetNozzle[]>("nozzles");
-        private static readonly AccessTools.FieldRef<JetNozzle, float> NozzleThrust = AccessTools.FieldRefAccess<JetNozzle, float>("totalThrust");
-        private static readonly AccessTools.FieldRef<JetNozzle, float> NozzleShare = AccessTools.FieldRefAccess<JetNozzle, float>("thrustProportion");
-        private static readonly AccessTools.FieldRef<JetNozzle, Transform> NozzleTransform = AccessTools.FieldRefAccess<JetNozzle, Transform>("thrustTransform");
-
         private readonly AircraftLink link;
         private readonly ManualLogSource log;
         private readonly List<AeroPart> parts;
         private readonly HashSet<Rigidbody> bodies = new HashSet<Rigidbody>();
         private readonly MassProps mass = new MassProps();
-        private readonly float[] lift, drag, density;
+        private readonly GameAero aero;
 
         // the pass of the current tick, waiting for the engines and then the next tick's measurement
         private bool pending;
@@ -56,11 +45,8 @@ namespace AutopilotMod.Fbw
         {
             this.link = link;
             this.log = log;
-            parts = AircraftLink.Find<AeroPart>(link.Aircraft);
-            AeroJobSettings settings = AeroJob(JobManager.i);
-            lift = settings.liftCharts.ToArray();
-            drag = settings.dragCharts.ToArray();
-            density = LevelInfo.airDensityChart.ToArray();
+            parts = link.AeroParts;
+            aero = link.Aero;
             ForceProbe.Start(bodies);
             ForceProbe.Reset(link.Aircraft.rb.position);
             LogInventory();
@@ -105,41 +91,21 @@ namespace AutopilotMod.Fbw
             mass.Finish();
             cg = mass.Cg;
 
-            Vector3 wind = LevelInfo.i != null ? LevelInfo.i.GetWind() : Vector3.zero;
-            float turbulence = LevelInfo.i != null ? LevelInfo.i.GetTurbulence() : 0f;
-            float t = Time.timeSinceLevelLoad;
             float errSum = 0f, forceSum = 0f, worst = 0f;
             int skipped = 0;
             V3 mGame = V3.Zero, mModel = V3.Zero;
             foreach (AeroPart p in parts)
             {
-                if (p == null || p.IsDetached() || p.rb == null || !PartJob(p).IsCreated) continue;
-                ref AeroPartFields f = ref PartJob(p).Ref();
-                Transform lt = p.LiftNormal;
-                Vector3 gp = lt.GlobalPosition().AsVector3();
-                if (Mathf.Max(f.submergedAmount, -(gp.y - f.collisionSize.y)) > 0f)
+                if (p == null || p.IsDetached() || p.rb == null) continue;
+                if (!aero.JobInput(p, out Plate.Input input, out Vector3 force, out Vector3 torque, out JobForceType kind))
                 {
                     skipped++;
                     continue;
                 }
-                var input = new Plate.Input
-                {
-                    VAir = V(f.velocity - Wind(gp, wind, turbulence, t)),
-                    LiftRot = Q(lt.rotation),
-                    ChannelForward = V(p.transform.forward),
-                    Channeling = f.airflowChanneling,
-                    Foil = f.airfoilID,
-                    Area = f.wingArea,
-                    DragArea = f.dragArea,
-                    Eff = f.wingEffectiveness,
-                    Rho = Plate.Read(density, 0, gp.y * 0.0021f, density.Length),
-                    SpeedOfSound = LevelInfo.GetSpeedOfSound(gp.y),
-                    CenterOfLift = V(f.centerOfLift),
-                };
-                V3 fm = Plate.Force(input, lift, drag, out _);
-                V3 tm = f.centerOfLift != Vector3.zero ? Plate.Torque(input, fm) : V3.Zero;
-                V3 fg = f.hasForce == JobForceType.NoForce ? V3.Zero : V(f.force);
-                V3 tg = f.hasForce == JobForceType.ForceAndTorque ? V(f.torque) : V3.Zero;
+                V3 fm = Plate.Force(input, aero.Lift, aero.Drag, out _);
+                V3 tm = input.CenterOfLift.SqrMagnitude > 0f ? Plate.Torque(input, fm) : V3.Zero;
+                V3 fg = kind == JobForceType.NoForce ? V3.Zero : V(force);
+                V3 tg = kind == JobForceType.ForceAndTorque ? V(torque) : V3.Zero;
 
                 float e = (fm - fg).Magnitude, g = fg.Magnitude;
                 errSum += e;
@@ -180,13 +146,12 @@ namespace AutopilotMod.Fbw
         public void AfterEngine(MonoBehaviour engine)
         {
             if (!pending) return;
-            JetNozzle[] nozzles = engine is Turbojet j ? JetNozzles(j) : engine is Turbofan f ? FanNozzles(f) : null;
+            JetNozzle[] nozzles = EngineLink.NozzlesOf(engine);
             if (nozzles == null) return;
             foreach (JetNozzle n in nozzles)
             {
-                if (n == null || NozzleShare(n) <= 0f) continue;
-                Transform tt = NozzleTransform(n);
-                mThrust += V3.Cross(V(tt.position) - cg, V(tt.forward * NozzleThrust(n)));
+                if (!EngineLink.Pushing(n, out Transform tt, out float thrust)) continue;
+                mThrust += V3.Cross(V(tt.position) - cg, V(tt.forward * thrust));
             }
         }
 
@@ -239,18 +204,7 @@ namespace AutopilotMod.Fbw
             public V3 CgFromRoot;       // m, Unity body axes
         }
 
-        /// <summary>The aero job's wind at a point (AeroJob_Math.CalcWind): level wind plus Perlin turbulence.</summary>
-        private static Vector3 Wind(Vector3 gp, Vector3 windVelocity, float turbulence, float time)
-        {
-            Vector3 n = windVelocity.normalized;
-            gp += time * Vector3.one * 10f;
-            Vector3 gust = (-0.75f + Mathf.PerlinNoise1D(gp.z * 0.02f) + 0.5f * Mathf.PerlinNoise1D(gp.z * 0.1f)) * n
-                         + 0.5f * (-0.75f + Mathf.PerlinNoise1D(gp.x * 0.02f) + 0.5f * Mathf.PerlinNoise1D(gp.x * 0.1f)) * Vector3.Cross(n, Vector3.up)
-                         + 0.3f * (-0.75f + Mathf.PerlinNoise1D(gp.y * 0.02f) + 0.5f * Mathf.PerlinNoise1D(gp.y * 0.1f)) * Vector3.up;
-            return windVelocity + turbulence * Mathf.Max(windVelocity.magnitude, 10f) * gust;
-        }
-
-        private static V3 V(Vector3 v) => new V3(v.x, v.y, v.z);
-        private static Q4 Q(Quaternion q) => new Q4(q.x, q.y, q.z, q.w);
+        private static V3 V(Vector3 v) => GameAero.V(v);
+        private static Q4 Q(Quaternion q) => GameAero.Q(q);
     }
 }

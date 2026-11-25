@@ -33,13 +33,14 @@ namespace AutopilotMod.Fbw
             sb.Append("t,dt,held,speed,rho,mass,alpha,beta,p,q,r,pdot,qdot,rdot,nz,pitch,roll,yaw,throttle");
             sb.Append(",aeroErrF,aeroErrM,aeroWorst,aeroSkip,pdotPred,qdotPred,rdotPred,pdotProbe,qdotProbe,rdotProbe");
             sb.Append(",mOtherL,mOtherM,mOtherN,mThrustL,mThrustM,mThrustN,cgX,cgY,cgZ");
+            sb.Append(",flying,pCmd,qCmd,rCmd,nuP,nuQ,nuR,unmetP,unmetQ,unmetR");
             foreach (SurfaceLink s in link.Surfaces) sb.Append(',').Append(s.Name).Append("_tgt,").Append(s.Name).Append("_ang,").Append(s.Name).Append("_split");
             for (int i = 0; i < link.Engines.Count; i++) sb.Append(",e").Append(i).Append("_nzx,e").Append(i).Append("_nzy,e").Append(i).Append("_thrust,e").Append(i).Append("_thr");
             w.WriteLine(sb.ToString());
         }
 
         /// <summary>Angles in degrees, rates in deg/s and deg/s^2.</summary>
-        public void Row(AircraftLink link, in AirframeState s, bool held, AeroCheck check)
+        public void Row(AircraftLink link, in AirframeState s, bool held, AeroCheck check, FbwFlight flight)
         {
             const float D = AirData.Rad2Deg;
             sb.Clear();
@@ -63,6 +64,16 @@ namespace AutopilotMod.Fbw
                 N(p.CgFromRoot.X); N(p.CgFromRoot.Y); N(p.CgFromRoot.Z);
             }
             else sb.Append(",,,,,,,,,,,,,,,");
+            if (flight != null)
+            {
+                var law = flight.Computer.Law;
+                var indi = flight.Computer.Indi;
+                sb.Append(",1");
+                N(law.P * D); N(law.Q * D); N(law.R * D);
+                N(indi.NuRoll * D); N(indi.NuPitch * D); N(indi.NuYaw * D);
+                N(indi.UnmetRoll * D); N(indi.UnmetPitch * D); N(indi.UnmetYaw * D);
+            }
+            else sb.Append(",0,,,,,,,,,");
             foreach (SurfaceLink sf in link.Surfaces)
             {
                 if (sf.JobReady) { N(sf.Target); N(sf.Angle); N(sf.Split); }
