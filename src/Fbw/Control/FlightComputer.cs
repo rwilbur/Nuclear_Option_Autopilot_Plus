@@ -133,9 +133,9 @@ namespace AutopilotMod.Fbw.Control
                     PitchTarget = qT, RollTarget = psT,
                     PitchFilter = Law.Q, RollFilter = Law.P * ca + Law.R * sa,
                     Q = s.Q, QDot = Indi.FilteredQDot, Roll = s.P * ca + s.R * sa, RollDot = Indi.FilteredPDot * ca + Indi.FilteredRDot * sa,
-                    Alpha = s.Alpha, Nz = s.Nz, NzGravity = (float)(Math.Cos(s.Pitch) * Math.Cos(s.Bank)), Speed = s.Speed, LiftSlope = LiftSlope,
+                    Alpha = s.Alpha, Beta = s.Beta, Nz = s.Nz, NzGravity = (float)(Math.Cos(s.Pitch) * Math.Cos(s.Bank)), Speed = s.Speed, LiftSlope = LiftSlope,
                     FullPitch = Law.FullStickPitch(s.Speed, Assist), FullRoll = Law.PMax,
-                    PitchLimit = Law.QMax, RollLimit = Law.PMax,
+                    PitchLimit = Law.QMax,
                 }, dt);
                 qT = gov.Governed;
                 psT = gov.GovernedRoll;

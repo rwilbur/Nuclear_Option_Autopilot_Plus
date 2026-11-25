@@ -28,12 +28,16 @@ namespace AutopilotMod.Fbw.Control
     /// The envelope: a command governor on the pitch and roll commands together. Each tick it picks the pitch-rate and
     /// stability-axis roll-rate targets handed to the rate loops so that the predicted AoA and load factor stay inside their
     /// limits over the next <see cref="Horizon"/> ticks, changing the pilot's commands as little as it can:
-    ///   q̄(k+i) = γⁱ μ + ν,  p̄ₛ(k+i) = ρ,
-    ///   min  β₁ μ² + β₂ (ν − q_pilot)² + β_p (ρ − p_pilot)² + Σᵢ slackᵢ²,   r̄(k) applied.
-    /// Pitch follows Simon, Härkegård and Löfberg (JGCD; Saab's Gripen simulator); governing a stability-axis roll at high
-    /// AoA with a predictive (dynamic) reference governor follows Ye, Chen and Wu (2015), who found it far better than a static
-    /// limiter. There are no fixed caps: when the jet can't give the whole roll and the whole pull together, the trade between
-    /// them comes out of the cost each tick, and each comes back as soon as the prediction allows.
+    ///   min over ν, ρ:  β_q (ν − q_pilot)² + β_p (ρ − p_pilot)² + Σᵢ slackᵢ²,   ρ between 0 and p_pilot,
+    /// with the targets held over the horizon and re-solved every tick. Pitch follows Simon, Härkegård and Löfberg (JGCD; Saab's
+    /// Gripen simulator); governing a stability-axis roll at high AoA with a predictive reference governor follows Ye, Chen and
+    /// Wu (2015), who found it far better than a static limiter. There are no fixed caps: when the jet can't give the whole roll
+    /// and the whole pull together, the trade between them comes out of the cost each tick, and each comes back as soon as the
+    /// prediction allows. The governor only ever takes roll away, as a reference governor attenuates its command: it never
+    /// reverses the pilot's roll or adds to it.
+    /// The paper's second pitch unknown, a decaying part γⁱ μ on top of ν, is left out: with it the searches (one unknown at a
+    /// time, the two strongly coupled) did not settle in flight, and the pitch command jumped between ticks (Ifrit and Revoker
+    /// logs, 25 Nov). With ν alone the solution moves continuously away from the pilot's command as a limit comes near.
     ///
     /// The prediction is the closed loop this FBW is built to have, not a fitted model:
     /// - each axis: the law's pre-filter, the INDI rate loop as designed (wanted acceleration K (cmd − rate) + cmd rate), the
@@ -42,8 +46,10 @@ namespace AutopilotMod.Fbw.Control
     ///   about the flight path at AoA α turns the body at p = pₛ cos α, r = pₛ sin α, which pitches the nose by
     ///   k p r = ½ k pₛ² sin 2α, k = (I_yaw − I_roll)/I_pitch. Nose up at positive AoA, no surface removes it, and in a hard
     ///   rolling pull it outruns the nose-down authority (NASA TP-1689; bench: the Revoker past 50 deg at 150 m/s);
-    /// - the short-period kinematics α̇ = q − (g/V)(n_z − n_z,grav), n_z = n_z0 + (dn_z/dα)(α − α0), lift slope from the
-    ///   game's own plates (<see cref="LiftCurve"/>).
+    /// - the AoA kinematics α̇ = q − pₛ tan β − (g/V)(n_z − n_z,grav), n_z = n_z0 + (dn_z/dα)(α − α0), lift slope from the
+    ///   game's own plates (<see cref="LiftCurve"/>), sideslip held at its value now. A roll with sideslip trades AoA for
+    ///   sideslip at pₛ tan β: rolling against the pedal at 260 m/s drove the Revoker to −4.5 g, and with the pedal the Ifrit's
+    ///   rolling pull to 10 g, while the model without the term predicted the opposite (flight logs, 25 Nov).
     /// Solved by golden-section searches on each unknown in turn, each cost one simulation of the horizon; only when the
     /// pilot's own commands are predicted to break a limit.
     /// Units in the cost: AoA slack in degrees, load-factor slack in g, rates relative to the full-stick rates.
@@ -55,10 +61,9 @@ namespace AutopilotMod.Fbw.Control
         public const int Horizon = 90;
         public const int PredictStep = 30;      // the prediction logged for checking against what happened (0.5 s)
         private const float G = 9.81f, Rad2Deg = 57.29578f;
-        private const int Rounds = 3, Golden = 24; // searches: rounds of (ν, μ, ρ), golden-section steps each
+        private const int Rounds = 2, Golden = 24; // searches: rounds of (ν, ρ), golden-section steps each
 
-        public float Gamma = 0.95f;             // per tick: decay of the transient part μ
-        public float Beta1 = 0.01f, Beta2 = 0.1f, SlackWeight = 1f; // the paper's weights
+        public float Beta2 = 0.1f, SlackWeight = 1f; // the paper's weights on the command change and on the slack
         public float BetaRoll = 0.1f;           // giving up roll costs as much as giving up pitch, per full-stick unit
 
         /// <summary>Limits: AoA (rad), load factor (g). <see cref="AlphaLimited"/> false: the AoA limits are off (Stability Assist off).</summary>
@@ -81,7 +86,7 @@ namespace AutopilotMod.Fbw.Control
         public float Wanted, Governed, WantedRoll, GovernedRoll, PredAlpha, PredNz;
 
         // this tick's model
-        private float q0, qf0, qAcc0, p0, pf0, pAcc0, alpha0, nz0, excess, slope, gv, kf, dt, hiA, loA;
+        private float q0, qf0, qAcc0, p0, pf0, pAcc0, alpha0, nz0, excess, slope, tanBeta, gv, kf, dt, hiA, loA;
         private float qScale, pScale, qWant, pWant, coupling0;
         private float predA, predN;
 
@@ -91,9 +96,9 @@ namespace AutopilotMod.Fbw.Control
             public float PitchTarget, RollTarget;  // the pilot's targets (rad/s)
             public float PitchFilter, RollFilter;  // the law's pre-filter states (rad/s)
             public float Q, QDot, Roll, RollDot;   // measured rates and (filtered) accelerations
-            public float Alpha, Nz, NzGravity, Speed, LiftSlope;
+            public float Alpha, Beta, Nz, NzGravity, Speed, LiftSlope;
             public float FullPitch, FullRoll;      // full-stick rates (rad/s): the cost's units
-            public float PitchLimit, RollLimit;    // the largest commands (rad/s)
+            public float PitchLimit;               // the largest pitch command (rad/s)
         }
 
         /// <summary>One solve. Returns through <see cref="Governed"/> and <see cref="GovernedRoll"/>.</summary>
@@ -104,6 +109,7 @@ namespace AutopilotMod.Fbw.Control
             q0 = n.Q; qf0 = n.PitchFilter; qAcc0 = Math.Max(Pitch.Lo, Math.Min(Pitch.Hi, n.QDot));
             p0 = n.Roll; pf0 = n.RollFilter; pAcc0 = Math.Max(Roll.Lo, Math.Min(Roll.Hi, n.RollDot));
             alpha0 = n.Alpha; nz0 = n.Nz; excess = n.Nz - n.NzGravity; slope = n.LiftSlope;
+            tanBeta = (float)Math.Tan(Math.Max(-1.2f, Math.Min(1.2f, n.Beta)));
             dt = step; kf = step / (Tau + step); gv = G / Math.Max(n.Speed, 30f);
             qScale = Math.Max(n.FullPitch, 0.05f);
             pScale = Math.Max(n.FullRoll, 0.05f);
@@ -111,40 +117,39 @@ namespace AutopilotMod.Fbw.Control
             loA = AlphaLimited ? AlphaMin * Rad2Deg : float.NegativeInfinity;
             coupling0 = Coupling(p0, alpha0); // in the measured pitch acceleration already
 
-            float mu = 0f, nu = qWant, rho = pWant;
-            if (Slack(0f, nu, rho) > 0f) // the pilot's own commands stay inside the envelope: nothing to do (and no search)
+            float nu = qWant, rho = pWant;
+            if (Slack(nu, rho) > 0f) // the pilot's own commands stay inside the envelope: nothing to do (and no search)
             {
+                float rLo = Math.Min(0f, pWant), rHi = Math.Max(0f, pWant);
                 for (int round = 0; round < Rounds; round++)
                 {
-                    nu = Search(0, mu, nu, rho, -n.PitchLimit, n.PitchLimit);
-                    mu = Search(1, mu, nu, rho, -2f * n.PitchLimit, 2f * n.PitchLimit);
-                    rho = Search(2, mu, nu, rho, -n.RollLimit, n.RollLimit);
+                    nu = Search(false, nu, rho, -n.PitchLimit, n.PitchLimit);
+                    if (rHi > rLo) rho = Search(true, nu, rho, rLo, rHi);
                 }
-                mu = Math.Max(-n.PitchLimit - nu, Math.Min(n.PitchLimit - nu, mu));
             }
-            Slack(mu, nu, rho); // leaves the prediction of the chosen commands in predA, predN
+            Slack(nu, rho); // leaves the prediction of the chosen commands in predA, predN
             PredAlpha = predA / Rad2Deg;
             PredNz = predN;
-            Governed = mu + nu;
+            Governed = nu;
             GovernedRoll = rho;
         }
 
         /// <summary>The roll's inertia-coupling pitch acceleration (rad/s²) at stability-axis roll rate <paramref name="ps"/> and AoA <paramref name="alpha"/>.</summary>
         private float Coupling(float ps, float alpha) => 0.5f * CouplingGain * ps * ps * (float)Math.Sin(2f * alpha);
 
-        private float Cost(float mu, float nu, float rho)
+        private float Cost(float nu, float rho)
         {
-            float dq = (nu - qWant) / qScale, m = mu / qScale, dp = (rho - pWant) / pScale;
-            return Beta1 * m * m + Beta2 * dq * dq + BetaRoll * dp * dp + SlackWeight * Slack(mu, nu, rho);
+            float dq = (nu - qWant) / qScale, dp = (rho - pWant) / pScale;
+            return Beta2 * dq * dq + BetaRoll * dp * dp + SlackWeight * Slack(nu, rho);
         }
 
         /// <summary>The commands' predicted limit violations, summed over the horizon (deg² and g²); the prediction <see cref="PredictStep"/> ahead in predA, predN.</summary>
-        private float Slack(float mu, float nu, float rho)
+        private float Slack(float nu, float rho)
         {
             float slack = 0f;
             // a: AoA change from now (rad). eq, ep: each axis's acceleration as the effectors set it (rad/s²); the airframe's stiffness
             // and the roll's inertia coupling add to pitch on top, counted from their values now (in the measured acceleration already).
-            float qf = qf0, q = q0, eq = qAcc0, pf = pf0, p = p0, ep = pAcc0, a = 0f, u = 1f;
+            float qf = qf0, q = q0, eq = qAcc0, pf = pf0, p = p0, ep = pAcc0, a = 0f;
             for (int i = 0; i < Horizon; i++)
             {
                 // roll about the flight path
@@ -154,16 +159,14 @@ namespace AutopilotMod.Fbw.Control
                 pfn = Toward(pfn, p, (pWantAcc - ep) * dt);
 
                 // pitch
-                float target = u * mu + nu;
-                u *= Gamma;
-                float qfn = qf + kf * (target - qf);
+                float qfn = qf + kf * (nu - qf);
                 float qWantAcc = KPitch * (qfn - q) + (qfn - qf) / dt;
                 float natural = Stiffness * a + Coupling(p, alpha0 + a) - coupling0;
                 eq = Pitch.Next(eq, qWantAcc - natural, dt);
                 float acc = eq + natural;
                 qfn = Toward(qfn, q, (qWantAcc - acc) * dt);
 
-                a += dt * (q - gv * (excess + slope * a));
+                a += dt * (q - p * tanBeta - gv * (excess + slope * a));
                 q += acc * dt;
                 p += ep * dt;
                 qf = qfn;
@@ -189,21 +192,18 @@ namespace AutopilotMod.Fbw.Control
             return Math.Abs(next - measured) < Math.Abs(cmd - measured) ? next : cmd;
         }
 
-        // golden-section minimum of the cost over one unknown (0: ν, 1: μ, 2: ρ) on [lo, hi], the others held; unimodal along each
-        private float Search(int which, float mu, float nu, float rho, float lo, float hi)
+        // golden-section minimum of the cost over ρ (overRoll) or ν on [lo, hi], the other held; unimodal along each
+        private float Search(bool overRoll, float nu, float rho, float lo, float hi)
         {
             const float R = 0.618034f;
             float x1 = hi - R * (hi - lo), x2 = lo + R * (hi - lo);
-            float f1 = At(which, x1, mu, nu, rho), f2 = At(which, x2, mu, nu, rho);
+            float f1 = overRoll ? Cost(nu, x1) : Cost(x1, rho), f2 = overRoll ? Cost(nu, x2) : Cost(x2, rho);
             for (int i = 0; i < Golden; i++)
             {
-                if (f1 < f2) { hi = x2; x2 = x1; f2 = f1; x1 = hi - R * (hi - lo); f1 = At(which, x1, mu, nu, rho); }
-                else { lo = x1; x1 = x2; f1 = f2; x2 = lo + R * (hi - lo); f2 = At(which, x2, mu, nu, rho); }
+                if (f1 < f2) { hi = x2; x2 = x1; f2 = f1; x1 = hi - R * (hi - lo); f1 = overRoll ? Cost(nu, x1) : Cost(x1, rho); }
+                else { lo = x1; x1 = x2; f1 = f2; x2 = lo + R * (hi - lo); f2 = overRoll ? Cost(nu, x2) : Cost(x2, rho); }
             }
             return 0.5f * (lo + hi);
         }
-
-        private float At(int which, float x, float mu, float nu, float rho) =>
-            which == 0 ? Cost(mu, x, rho) : which == 1 ? Cost(x, nu, rho) : Cost(mu, nu, x);
     }
 }

@@ -197,6 +197,18 @@ Choices, and the evidence for them:
   predictions ran 5–8 deg off at the stock 286 deg/s Ifrit roll. Acting on them, the governor swung its commands
   and upset the Vortex and Revoker. Move suppression steadied it but cost pushes their g. So the roll cap stays for now.
   The next attempt needs the lateral model checked against flight logs first.
+- **First flights (Ifrit, Revoker, 25 Nov 2026).**
+  - The envelope held in pulls: the Ifrit was past its AoA limit for 0.55 s in 5 minutes, by at most 0.8 deg. In flight the
+    0.5 s AoA prediction was 1.5–2 deg rms, as on the bench.
+  - Two excursions came with full pedal held against or into a roll: the Revoker at −4.5 g, the Ifrit at 10 g. A roll with
+    sideslip trades AoA for sideslip at pₛ tan β (33 deg/s on the Revoker), which the model lacked. It was added, with
+    sideslip held at its measured value.
+  - The coordinate search over the paper's two pitch unknowns (ν and the decaying μ) did not settle: the pitch command
+    jumped between ticks, and the roll was sometimes reversed or raised past the pilot's. Now there is one pitch unknown,
+    and the roll can only be taken toward zero, never reversed or added to.
+  - Still open: sideslip. A full roll at 89 m/s and 25 deg AoA builds 9 deg with no pedal; on the bench, a Vortex rolling
+    pull at 150 m/s builds 23 deg. The governor holds AoA and g only, and the 180 deg/s roll cap stays. The logged rolls are
+    the data for validating a lateral model before it is tried again.
 - Known: with a deliberate extra tick of delay, the Revoker at 110 m/s still overshoots its AoA limit by 4.7 deg (under
   its lift peak). The game's timing has no such tick (phase 1). Solve cost: up to ~200 simulations of 90 ticks, only on
   ticks where the pilot's command would break a limit. To be timed in phase 7.
