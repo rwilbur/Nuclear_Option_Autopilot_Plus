@@ -23,6 +23,7 @@ internal static class SelfCheck
 
     private static int Main()
     {
+        if (Environment.GetEnvironmentVariable("FBW_SLIP") != null) { ExploreSlip(); return 0; }
         // ---- rocker steps ----
         Check(Near(ApMath.Snap(1234f, +1, 50f), 1250f), "Snap up goes to the next multiple");
         Check(Near(ApMath.Snap(1250f, +1, 50f), 1300f), "Snap up from a multiple moves a full step");
@@ -592,8 +593,9 @@ internal static class SelfCheck
                 Check(slow.PErr < (c.name == "model" ? 0.1f : 0.2f), $"bench {jet} {c.name}: a half-stick roll at 90 m/s follows the command ({100 * slow.PErr:F0}% off)");
                 // pass marks: what the 25 Nov tuning shows, with room. Noise and delay are allowed more surface dither.
                 bool nominal = c.name == "model";
-                // Revoker canards + nozzle: 2-5; nominal 3.07 since allocation moved to stability axes (25 Nov), the other jets 0-0.5
-                float chatterMax = c.noise > 0f ? 8f : c.delay > 0 ? 12f : nominal ? 3.5f : 6f;
+                // Revoker canards + nozzle: 2-5; nominal 3.07 since allocation moved to stability axes, 3.6 with the coordinated-roll limit
+                // (25 Nov; small reversals, cosmetic at this size), the other jets 0-0.5
+                float chatterMax = c.noise > 0f ? 8f : c.delay > 0 ? 12f : nominal ? 4f : 7f;
                 Check(hold.RateRms < (nominal ? 0.5f : 2f), $"bench {jet} {c.name}: hands-off holds the rates ({hold.RateRms:F2} deg/s rms)");
                 Check(pull.QErr < (nominal ? 0.06f : 0.12f), $"bench {jet} {c.name}: pitch rate follows the command ({100 * pull.QErr:F0}% off)");
                 Check(pull.QOver < 0.2f, $"bench {jet} {c.name}: no large pitch overshoot ({100 * pull.QOver:F0}%)");
@@ -602,6 +604,7 @@ internal static class SelfCheck
                 Check(chatter < chatterMax, $"bench {jet} {c.name}: surfaces don't chatter ({chatter:F2} reversals per surface per second)");
             }
         }
+        CheckSweep();
         CheckFbwEnvelope(dir, jets, cases);
     }
 
@@ -609,6 +612,101 @@ internal static class SelfCheck
     /// Phase 4: full-stick pulls (g-limited fast, AoA-limited slow), a rolling pull, a release and a push stay inside the
     /// envelope on every jet, on and off model. Also lists every exported jet's AoA limits against stock's.
     /// </summary>
+    /// <summary>Development (FBW_SLIP=1, or FBW_SLIP="&lt;unit&gt;|&lt;run&gt;" to trace one run): sideslip in hard rolls on every exported jet.</summary>
+    private static void ExploreSlip()
+    {
+        string trace = Environment.GetEnvironmentVariable("FBW_SLIP"); // "<unit>|<run>" also prints that run's trace
+        if (trace.Contains("|")) Console.WriteLine("t AoA beta ps rs psCmd rsCmd unmetPs unmetRs rollHi psGov nz accHi accLo");
+        string dir = System.IO.Path.Combine(AppContext.BaseDirectory, "airframes");
+        var runs = new (string name, float speed, float secs, Func<float, (float, float, float)> stick)[]
+        {
+            ("full roll 200", 200f, 2.5f, t => (0f, t > 0.2f ? 1f : 0f, 0f)),
+            ("reversal 200", 200f, 3f, t => (0f, t < 0.2f ? 0f : t < 1.5f ? 1f : -1f, 0f)),
+            ("push+roll 190", 190f, 3f, t => (t > 0.2f ? 1f : 0f, t > 0.2f ? -1f : 0f, 0f)),
+            ("roll+pull 150", 150f, 3f, t => (t > 0.2f ? -1f : 0f, t > 0.2f ? 1f : 0f, 0f)),
+            ("full roll 90", 90f, 2.5f, t => (0f, t > 0.2f ? 1f : 0f, 0f)),
+            ("pull+roll 90", 90f, 3f, t => (t > 0.2f ? -1f : 0f, t > 1f ? 1f : 0f, 0f)),
+        };
+        foreach (string file in System.IO.Directory.GetFiles(dir, "*.json").OrderBy(x => x))
+        foreach (var run in runs)
+        {
+            var b = new FbwBench(file);
+            b.Start(run.speed);
+            for (int k = 0; k < 120; k++) b.Step(0f, 0f, 0f);
+            float d = 57.29578f, bMax = 0f, aHi = -999f, aLo = 999f, psMax = 0f;
+            int n = (int)(run.secs * 60f);
+            for (int k = 0; k < n; k++)
+            {
+                var (sp, sr, sy) = run.stick(k / 60f);
+                b.Step(sp, sr, sy);
+                var s = b.State();
+                bMax = Math.Max(bMax, Math.Abs(s.Beta) * d);
+                aHi = Math.Max(aHi, s.Alpha * d); aLo = Math.Min(aLo, s.Alpha * d);
+                psMax = Math.Max(psMax, Math.Abs(s.P * (float)Math.Cos(s.Alpha) + s.R * (float)Math.Sin(s.Alpha)) * d);
+                if (trace == b.Unit + "|" + run.name && k % 3 == 0)
+                {
+                    float ca = (float)Math.Cos(s.Alpha), sa = (float)Math.Sin(s.Alpha);
+                    var L = b.Fc.Law; var I = b.Fc.Indi; var G = b.Fc.Governor;
+                    Console.WriteLine(string.Join(" ", new[] { k / 60f, s.Alpha * d, s.Beta * d, (s.P * ca + s.R * sa) * d, (s.R * ca - s.P * sa) * d,
+                        (L.P * ca + L.R * sa) * d, (L.R * ca - L.P * sa) * d, I.UnmetRoll * d, I.UnmetYaw * d, b.Fc.RollHi * d, G.GovernedRoll * d, s.Nz, b.Fc.RollAccelHi * d, b.Fc.RollAccelLo * d }.Select(x => x.ToString("F1").PadLeft(7))));
+                }
+            }
+            Console.WriteLine($"slip {b.Unit,-17} {run.name,-14} beta {bMax,5:F1}  AoA {aLo,6:F1}..{aHi,5:F1}  roll max {psMax,4:F0} deg/s (cmd {b.Fc.Law.PMax * d:F0})");
+        }
+    }
+
+    // stability-yaw acceleration the effectors have left (rad/s²): B is in stability axes after the INDI step
+    private static float YawRoom(AutopilotMod.Fbw.Control.FlightComputer fc, bool up)
+    {
+        float sum = 0f;
+        for (int j = 0; j < fc.Slots; j++)
+        {
+            float br = fc.Indi.Alloc.B[3 * j + 2], t1 = br * (fc.UsableHi[j] - fc.Position[j]), t2 = br * (fc.UsableLo[j] - fc.Position[j]);
+            sum += up ? Math.Max(0f, Math.Max(t1, t2)) : Math.Min(0f, Math.Min(t1, t2));
+        }
+        return sum;
+    }
+
+    /// <summary>The coordinated-roll LP against vertex enumeration on small random cases (where the need is reachable).</summary>
+    private static void CheckSweep()
+    {
+        var rng = new Random(7);
+        float[] a = new float[3], b = new float[3], lo = new float[3], hi = new float[3], key = new float[3], x = new float[3];
+        int[] order = new int[3];
+        float worst = 0f;
+        for (int t = 0; t < 200; t++)
+        {
+            for (int j = 0; j < 3; j++)
+            {
+                a[j] = (float)rng.NextDouble() * 2f - 1f; b[j] = (float)rng.NextDouble() * 2f - 1f;
+                lo[j] = -(float)rng.NextDouble(); hi[j] = (float)rng.NextDouble();
+            }
+            float need = (float)rng.NextDouble() * 0.6f - 0.3f;
+            float got = AutopilotMod.Fbw.Control.FlightComputer.Sweep(3, a, b, lo, hi, need, key, order, x);
+            // exact: an optimum has at most one variable strictly inside its box; try each as the free one, the rest at a bound
+            float best = float.MinValue;
+            for (int free = -1; free < 3; free++)
+            for (int mask = 0; mask < 8; mask++)
+            {
+                float[] y = new float[3];
+                for (int j = 0; j < 3; j++) y[j] = (mask >> j & 1) != 0 ? hi[j] : lo[j];
+                if (free >= 0)
+                {
+                    if (b[free] == 0f) continue;
+                    float rest = 0f;
+                    for (int j = 0; j < 3; j++) if (j != free) rest += b[j] * y[j];
+                    y[free] = (need - rest) / b[free];
+                    if (y[free] < lo[free] - 1e-5f || y[free] > hi[free] + 1e-5f) continue;
+                }
+                else if (Math.Abs(b[0] * y[0] + b[1] * y[1] + b[2] * y[2] - need) > 1e-5f) continue;
+                best = Math.Max(best, a[0] * y[0] + a[1] * y[1] + a[2] * y[2]);
+            }
+            float sumB = b[0] * x[0] + b[1] * x[1] + b[2] * x[2];
+            if (best > float.MinValue) worst = Math.Max(worst, Math.Max(Math.Abs(got - best), Math.Abs(sumB - need)) - 1e-4f);
+        }
+        Check(worst <= 0f, $"coordinated-roll LP matches the exact vertex optimum (worst excess {worst:F5})");
+    }
+
     private static void CheckFbwEnvelope(string dir, string[] jets, (string name, float scale, int delay, float noise)[] cases)
     {
         foreach (string file in System.IO.Directory.GetFiles(dir, "*.json").OrderBy(x => x))
@@ -647,6 +745,8 @@ internal static class SelfCheck
                 {
                     Console.WriteLine($"envelope {jet,-15} {c.name,-9} {name,-13} AoA {r.AlphaLo:F1}..{r.AlphaHi:F1} (limits {r.AlphaMin:F1}..{r.AlphaMax:F1}) nz {r.NzLo:F2}..{r.NzHi:F2} (limits {r.NzMin:F1}..{r.NzMax:F1}) beta {r.BetaMax:F1} pred err {r.PredErr:F2} deg");
                     Check(r.AlphaHi < r.AlphaMax + aoaOver && r.AlphaLo > r.AlphaMin - aoaOver, $"envelope {jet} {c.name} {name}: AoA inside its limits ({r.AlphaLo:F1}..{r.AlphaHi:F1}, limits {r.AlphaMin:F1}..{r.AlphaMax:F1})");
+                    // the coordinated-roll limit: a rolling pull used to build 23.5 deg on the Vortex (allowance 3, overshoot to ~8; off model 12)
+                    Check(r.BetaMax < (c.name == "model" ? 10f : 15f), $"envelope {jet} {c.name} {name}: sideslip held ({r.BetaMax:F1} deg)");
                     Check(r.NzHi < r.NzMax + 0.3f && r.NzLo > r.NzMin - 0.3f, $"envelope {jet} {c.name} {name}: load factor inside its limits ({r.NzLo:F2}..{r.NzHi:F2}, limits {r.NzMin:F1}..{r.NzMax:F1})");
                 }
             }

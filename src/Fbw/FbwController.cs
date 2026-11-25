@@ -6,6 +6,15 @@ using UnityEngine;
 
 namespace AutopilotMod.Fbw
 {
+    /// <summary>What the limit override does to the AoA limit.</summary>
+    internal enum OverrideAoa
+    {
+        /// <summary>None: flies as with Stability Assist off (full pitch rate, past the lift peak if held).</summary>
+        NoLimit,
+        /// <summary>Raised to the lift peak: the most turn there is, and no further.</summary>
+        LiftPeak,
+    }
+
     internal enum FbwMode
     {
         /// <summary>Stock fly-by-wire, untouched. Telemetry can still log.</summary>
@@ -38,7 +47,7 @@ namespace AutopilotMod.Fbw
 
         private readonly ConfigEntry<FbwMode> mode;
         private readonly ConfigEntry<bool> telemetry;
-        private readonly ConfigEntry<KeyboardShortcut> overrideKey;
+        private readonly ApSettings cfg;
         private readonly ManualLogSource log;
 
         private AircraftLink link;
@@ -50,11 +59,11 @@ namespace AutopilotMod.Fbw
         private AeroCheck check;         // phase-2 diagnostics, with telemetry
         private Aircraft failed;         // the aircraft the FBW faulted on: stays stock until it is replaced
 
-        public FbwController(ConfigEntry<FbwMode> mode, ConfigEntry<bool> telemetry, ConfigEntry<KeyboardShortcut> overrideKey, ManualLogSource log)
+        public FbwController(ApSettings cfg, ManualLogSource log)
         {
-            this.mode = mode;
-            this.telemetry = telemetry;
-            this.overrideKey = overrideKey;
+            this.cfg = cfg;
+            mode = cfg.FbwMode;
+            telemetry = cfg.FbwTelemetry;
             this.log = log;
         }
 
@@ -91,8 +100,11 @@ namespace AutopilotMod.Fbw
                 {
                     link.HoldSurfaces();
                     link.HoldEngines();
-                    KeyboardShortcut k = overrideKey.Value;
+                    KeyboardShortcut k = cfg.KeyLimitOverride.Value;
                     flight.LimitOverride = k.MainKey != KeyCode.None && Input.GetKey(k.MainKey) && k.Modifiers.All(Input.GetKey);
+                    flight.OverridePeak = cfg.OverrideAoa.Value == OverrideAoa.LiftPeak;
+                    flight.OverrideG = cfg.OverrideG.Value;
+                    flight.SlipAllowance = cfg.RollSideslip.Value / AirData.Rad2Deg;
                     flight.Tick(state, dt);
                 }
                 else if (mode.Value != FbwMode.Off)

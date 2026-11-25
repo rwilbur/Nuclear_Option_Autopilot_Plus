@@ -228,6 +228,25 @@ Choices, and the evidence for them:
     (AoA through +-180). That flight condition is outside any envelope. The lift-curve sweeps taken during the tumble pulled the AoA limit
     from 33 to 15 deg, and it took 9 s to climb back. Fixed: no sweep with more than 10 deg of sideslip.
   - With the override held, rolling pulls at 480 m/s reached 9.5 g on a 9 g limit, with 12 deg of sideslip.
+- Override settings (envelope display buttons, or config): AoA free (as Stability Assist off) or raised to the lift peak; the
+  g limit times 1 / 1.25 / 1.5 / 2 while held, never above 19 g (pilot damage at 20 g; the game has no airframe over-g damage,
+  but G-LOC drains blood pressure at 0.04 per g per second).
+- Sideslip protection (replaces the 180 deg/s roll cap). What builds the sideslip, measured: beta rate = -(stability yaw
+  rate), all kinematic (side force and gravity about 1 deg/s); a roll the yaw can't follow turns AoA into sideslip.
+  - Hedging gave the yaw command up each tick (the allocator's movement cost leaves part of every request unmet) and the
+    Vortex's V-tail (pitch -40 / yaw 20) went to pitch, weighted 100 to yaw's 30. Yaw above pitch fixed the sideslip but
+    broke the noise and off-model AoA cases.
+  - `FlightComputer.CoordinatedRoll`: two limits from the effectors' own reach, both as an exact LP (maximise along a line
+    in the reachable increments, roll/yaw solved by the Lagrangian sweep, pitch by bisection on its price):
+    - steady: the roll rates at which roll, pitch and yaw can be held, with the airframe's response to roll rate (plate
+      rate damping from `LiftCurve.RateMoment` plus the gyroscopic term);
+    - onset: the roll acceleration available with pitch kept at what it got and yaw given what the INDI asked. Over the
+      usable travel: over one tick's servo reach it starved the roll (1 deg/s rolling pulls).
+  - It only slows the pilot's roll, never reverses it, and never holds back a roll-out. A sideslip allowance (default 3 deg)
+    lets the roll run free while |beta| is small, fading to the coordinated limit as it grows: at 200 m/s the Ifrit rolls
+    190 deg/s instead of 159. At low speed and high AoA more sideslip slows the roll (dihedral), so the limit is real there.
+  - Bench, all ten jets: rolling pulls at 150 m/s, 23.5 -> 7.5 deg (Vortex), 18 -> 6 (Ifrit); everything else under 7.
+    `FBW_SLIP=1 dotnet run --project tests/SelfCheck.csproj` lists the cases; `FBW_SLIP="<unit>|<run>"` traces one.
 
 Bench: a rigid-body simulator built on the effector models and each jet's export. It adds deliberate model
 error, delay, servo lag and part flex, because a plant that matches the model exactly makes everything look

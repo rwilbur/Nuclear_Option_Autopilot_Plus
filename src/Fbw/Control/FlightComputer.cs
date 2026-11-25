@@ -46,6 +46,26 @@ namespace AutopilotMod.Fbw.Control
         /// <summary>Inertia coupling gain (I_yaw − I_roll) / I_pitch in body axes, filled by the caller.</summary>
         public float CouplingGain;
 
+        /// <summary>
+        /// The airframe's response to stability-axis roll rate, filled by the caller (<see cref="RollResponse"/>): body angular acceleration
+        /// (aerospace axes, rad/s² per rad/s) from the aero rate damping with the surfaces where they are, and the gyroscopic coupling.
+        /// Zero: no coordinated-roll limit.
+        /// </summary>
+        public V3 RollAccel;
+
+        /// <summary>The stability-axis roll rates (rad/s) the effectors can hold steady with the yaw coordinated, as of the latest step.</summary>
+        public float RollLo = -99f, RollHi = 99f;
+
+        /// <summary>The stability-axis roll accelerations (rad/s²) the effectors give this tick with pitch and yaw served, as of the latest step.</summary>
+        public float RollAccelLo, RollAccelHi;
+        private const float OnsetTau = 0.03f; // s
+
+        /// <summary>
+        /// Sideslip the roll may build before the coordinated-roll limits take over (rad, filled by the caller; 0 = always coordinated):
+        /// they fade in as |β| grows to it, so a roll runs at the stick's rate while the sideslip stays small.
+        /// </summary>
+        public float SlipAllowance = 3f / 57.29578f;
+
         public bool Assist = true;
         public readonly int Slots;
 
@@ -116,12 +136,17 @@ namespace AutopilotMod.Fbw.Control
         {
             Last = s;
             Law.Targets(stickPitch, stickRoll, stickYaw, s.Speed, s.Beta, s.Bank, s.Pitch, Assist, out float psT, out float qT, out float rYaw);
+            // sideslip protection: no roll faster than the yaw can coordinate (a roll the yaw can't follow turns AoA into sideslip,
+            // beta rate = -(stability yaw rate): Revoker log and bench, 25 Nov). It only slows the pilot's roll, never reverses it.
+            CoordinatedRoll(s, dt);
+            float psFree = psT, free = SlipAllowance > 0f ? Math.Max(0f, 1f - Math.Abs(s.Beta) / SlipAllowance) : 0f;
+            psT = psT > 0f ? Math.Max(0f, Math.Min(psT, RollHi)) : Math.Min(0f, Math.Max(psT, RollLo));
             CommandGovernor gov = Governor;
             gov.AlphaMax = AlphaMax;
             gov.AlphaMin = AlphaMin;
             gov.AlphaLimited = Assist;
-            gov.NzMax = Law.NzMax;
-            gov.NzMin = -NegativeG * Law.NzMax;
+            gov.NzMax = Law.NzLimit;
+            gov.NzMin = -NegativeG * Law.NzLimit;
             if (LiftSlope > 0f)
             {
                 float ca = (float)Math.Cos(s.Alpha), sa = (float)Math.Sin(s.Alpha);
@@ -149,6 +174,14 @@ namespace AutopilotMod.Fbw.Control
                 gov.Wanted = gov.Governed = qT;
                 gov.WantedRoll = gov.GovernedRoll = psT;
             }
+            // onset: the roll command speeds up no faster than the coordinated roll acceleration (rolling out is never held back)
+            {
+                float ca = (float)Math.Cos(s.Alpha), sa = (float)Math.Sin(s.Alpha), k = dt / (Law.Tau + dt);
+                float ps = Law.P * ca + Law.R * sa;
+                if (psT > ps && ps >= 0f) psT = Math.Min(psT, ps + Math.Max(0f, RollAccelHi) * dt / k);
+                else if (psT < ps && ps <= 0f) psT = Math.Max(psT, ps + Math.Min(0f, RollAccelLo) * dt / k);
+            }
+            psT += free * (psFree - psT); // within the sideslip allowance the stick's roll, fading to the coordinated one
             RateLaw.Body(psT, rYaw, s.Alpha, out float pT, out float rT);
             Law.Filter(pT, qT, rT, dt);
             Indi.Step(Slots, s.P, s.Q, s.R, s.PDot, s.QDot, s.RDot, s.Alpha, Law, Position, ReachLo, ReachHi, Neutral, CostScale, dt);
@@ -157,6 +190,162 @@ namespace AutopilotMod.Fbw.Control
             // all three 4.7.)
             float g = 1f / Indi.IncrementGain;
             Law.Hedge(Indi.UnmetRoll * g, Indi.UnmetPitch * g, Indi.UnmetYaw * g, s.P, s.Q, s.R, s.Alpha, dt);
+        }
+
+        private float[] lpA, lpB, lpQ, lpObj, lpLo, lpHi, lpKey, lpX;
+        private int[] lpOrder;
+
+        /// <summary>
+        /// <see cref="RollLo"/>/<see cref="RollHi"/>: the range of stability-axis roll rate ps at which the effectors, from where they are,
+        /// can hold roll, pitch and stability yaw steady. Steady at ps means ω̇_now + B·x + (ps − ps_now)·A = 0 (stability axes), A the
+        /// roll response: the line c + Δ·d (c = −ω̇_now, d = −A) must stay inside the set of reachable increments B·x. Pitch is held
+        /// first (an effector that pitches and yaws, like the Vortex's V-tail, is pitch's before it is yaw's, as in the allocator).
+        /// Solved exactly across the line in roll/yaw (<see cref="Sweep"/>) inside a bisection on the price of pitch.
+        /// </summary>
+        private void CoordinatedRoll(in FlightState s, float dt)
+        {
+            float ca = (float)Math.Cos(s.Alpha), sa = (float)Math.Sin(s.Alpha);
+            float ps = s.P * ca + s.R * sa, psDot = Indi.FilteredPDot * ca + Indi.FilteredRDot * sa;
+            // steady: the roll rates the yaw (and pitch) can hold
+            V3 c = -new V3(psDot, Indi.FilteredQDot, Indi.FilteredRDot * ca - Indi.FilteredPDot * sa);
+            if (LineRange(-new V3(RollAccel.X * ca + RollAccel.Z * sa, RollAccel.Y, RollAccel.Z * ca - RollAccel.X * sa), c, ca, sa, out float lo, out float hi))
+            {
+                RollLo = ps + lo;
+                RollHi = ps + hi;
+            }
+            else
+            {
+                RollLo = -99f;
+                RollHi = 99f;
+            }
+            // onset: the roll acceleration the effectors give this tick while pitch keeps what it got and yaw gets what the INDI asked
+            // (a roll that outruns the yaw's servos leaves sideslip behind: Vortex V-tail, bench 25 Nov)
+            // Over the usable travel, not this tick's servo reach: a one-tick limit starved the roll (the INDI asks little of a held-back
+            // command, so the surfaces barely move and the limit stays small; bench 25 Nov, rolling pulls at 90 m/s rolled 1 deg/s).
+            LineRange(new V3(1f, 0f, 0f), new V3(0f, Indi.GotPitch, Indi.RequestYaw), ca, sa, out lo, out hi);
+            // smoothed: from the measured acceleration it flickers tick to tick, and so did the Revoker's surfaces (bench chatter 3 -> 6)
+            float k = dt / (OnsetTau + dt);
+            RollAccelLo += (psDot + lo - RollAccelLo) * k;
+            RollAccelHi += (psDot + hi - RollAccelHi) * k;
+        }
+
+        /// <summary>
+        /// The Δ range for which c + Δ·d (stability axes: roll, pitch, yaw; rad/s²) lies in the effectors' reachable increments, from
+        /// where they are to their usable range. False if d is ~0.
+        /// </summary>
+        private bool LineRange(V3 d, V3 c, float ca, float sa, out float lo, out float hi)
+        {
+            lo = -99f;
+            hi = 99f;
+            float dn = d.Magnitude;
+            if (!(dn > 1e-4f)) return false;
+            if (lpA == null)
+            {
+                lpA = new float[Slots]; lpB = new float[Slots]; lpQ = new float[Slots]; lpObj = new float[Slots];
+                lpLo = new float[Slots]; lpHi = new float[Slots]; lpKey = new float[Slots]; lpX = new float[Slots];
+                lpOrder = new int[Slots];
+            }
+            // e along the line; n2 the pitch axis made square to it; n1 = e x n2 across it in roll/yaw
+            V3 e = d / dn, pitch = new V3(0f, 1f, 0f) - e * e.Y;
+            if (pitch.SqrMagnitude < 1e-6f) pitch = new V3(1f, 0f, 0f) - e * e.X;
+            V3 n2 = pitch / pitch.Magnitude, n1 = V3.Cross(e, n2);
+            float[] b = Indi.Alloc.B;
+            for (int j = 0; j < Slots; j++)
+            {
+                V3 m = new V3(b[3 * j] * ca + b[3 * j + 2] * sa, b[3 * j + 1], b[3 * j + 2] * ca - b[3 * j] * sa);
+                lpA[j] = V3.Dot(e, m);
+                lpB[j] = V3.Dot(n1, m);
+                lpQ[j] = V3.Dot(n2, m);
+                lpLo[j] = UsableLo[j] - Position[j];
+                lpHi[j] = UsableHi[j] - Position[j];
+            }
+            float along = V3.Dot(e, c), across = V3.Dot(n1, c), pitchNeed = V3.Dot(n2, c);
+            hi = (Furthest(1f, across, pitchNeed) - along) / dn;
+            lo = (Furthest(-1f, across, pitchNeed) - along) / dn; // Furthest gives Σ a x itself, here its least
+            return true;
+        }
+
+        // Σ a x furthest in direction sign along the line, with Σ b x = across and Σ q x = pitchNeed (or the most pitch there is)
+        private float Furthest(float sign, float across, float pitchNeed)
+        {
+            // objective cosθ·sign·a − sinθ·q: θ up prices pitch more, so Σ q x falls; find the θ where it meets pitchNeed
+            float lo = -1.55f, hi = 1.55f, theta = 0f;
+            if (PitchAt(lo, sign, across) <= pitchNeed) theta = lo;      // even all-out pitch falls short: pitch first
+            else if (PitchAt(hi, sign, across) >= pitchNeed) theta = hi; // even pitch-shy, more than needed
+            else
+            {
+                for (int i = 0; i < 30; i++)
+                {
+                    theta = 0.5f * (lo + hi);
+                    if (PitchAt(theta, sign, across) > pitchNeed) lo = theta; else hi = theta;
+                }
+            }
+            PitchAt(theta, sign, across);
+            float f = 0f;
+            for (int j = 0; j < Slots; j++) f += lpA[j] * lpX[j];
+            return f;
+        }
+
+        private float PitchAt(float theta, float sign, float across)
+        {
+            float cs = (float)Math.Cos(theta) * sign, sn = (float)Math.Sin(theta);
+            for (int j = 0; j < Slots; j++) lpObj[j] = cs * lpA[j] - sn * lpQ[j];
+            Sweep(Slots, lpObj, lpB, lpLo, lpHi, across, lpKey, lpOrder, lpX);
+            float q = 0f;
+            for (int j = 0; j < Slots; j++) q += lpQ[j] * lpX[j];
+            return q;
+        }
+
+        /// <summary>
+        /// x maximising Σ a_j x_j subject to Σ b_j x_j = <paramref name="need"/>, lo_j ≤ x_j ≤ hi_j (an exact LP: the Lagrangian sweep over
+        /// the breakpoints a_j / b_j); returns that max. If <paramref name="need"/> is out of reach, the max at the nearest reachable Σ b x.
+        /// <paramref name="key"/>, <paramref name="order"/> are scratch; <paramref name="x"/> gets the solution; all at least <paramref name="n"/> long.
+        /// </summary>
+        internal static float Sweep(int n, float[] a, float[] b, float[] lo, float[] hi, float need, float[] key, int[] order, float[] x)
+        {
+            float g = 0f, f = 0f;
+            int m = 0;
+            for (int j = 0; j < n; j++)
+            {
+                x[j] = b[j] > 0f ? hi[j] : b[j] < 0f ? lo[j] : a[j] > 0f ? hi[j] : lo[j];
+                g += b[j] * x[j];
+                f += a[j] * x[j];
+                if (b[j] != 0f)
+                {
+                    key[m] = a[j] / b[j];
+                    order[m++] = j;
+                }
+            }
+            if (need >= g) return f; // at or past the most Σ b x there is
+            Array.Sort(key, order, 0, m);
+            for (int i = 0; i < m; i++)
+            {
+                int j = order[i];
+                float to = b[j] > 0f ? lo[j] : hi[j], step = to - x[j];
+                float dg = b[j] * step;
+                if (g + dg <= need)
+                {
+                    float t = (need - g) / dg;
+                    x[j] += step * t;
+                    return f + a[j] * step * t;
+                }
+                g += dg;
+                f += a[j] * step;
+                x[j] = to;
+            }
+            return f;
+        }
+
+        /// <summary>
+        /// The airframe's body angular acceleration per rad/s of stability-axis roll (any frame; <paramref name="inertia"/>, <paramref name="omega"/>
+        /// and <paramref name="axis"/> in it, game sign): the rate damping <paramref name="rateMoment"/> (<see cref="LiftCurve.RateMoment"/>) and the
+        /// change of the gyroscopic term −I⁻¹(ω × Iω).
+        /// </summary>
+        public static V3 RollResponse(double[] inertia, V3 rateMoment, V3 omega, V3 axis)
+        {
+            const float h = 0.05f;
+            V3 Gyro(V3 w) => MassProps.Solve(inertia, V3.Cross(w, MassProps.Mul(inertia, w)));
+            return MassProps.Solve(inertia, rateMoment) - (Gyro(omega + axis * h) - Gyro(omega - axis * h)) / (2f * h);
         }
 
         /// <summary>

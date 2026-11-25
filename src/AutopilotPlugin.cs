@@ -59,7 +59,7 @@ namespace AutopilotMod
             gunHeat = new GunHeatPage(cfg, Logger);
             envelope = new EnvelopePage(cfg);
             airframeExport = new Fbw.AirframeExport(cfg.ExportAirframes, Logger);
-            Fbw.FbwController.Current = new Fbw.FbwController(cfg.FbwMode, cfg.FbwTelemetry, cfg.KeyLimitOverride, Logger);
+            Fbw.FbwController.Current = new Fbw.FbwController(cfg, Logger);
             mirror = new WebMirror(cfg, Logger, Report, ap, mfd, radarPage, gunHeat, envelope);
             FlightPlanner.Init(Logger, cfg);
             ap.ApDisconnected += () =>

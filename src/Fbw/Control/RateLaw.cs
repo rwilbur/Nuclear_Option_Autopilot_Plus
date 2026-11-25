@@ -16,16 +16,16 @@ namespace AutopilotMod.Fbw.Control
     {
         private const float G = 9.81f;
 
-        /// <summary>
-        /// Roll-rate cap (rad/s, 180 deg/s, the Revoker's stock rate). Stock commands half its max roll rate
-        /// whatever the jet can coordinate (286 deg/s on the Ifrit, whose yaw can't follow that: 10 deg of sideslip on
-        /// the bench). Phase 5 replaces this with a limit from the yaw capacity.
-        /// </summary>
-        public const float RollCap = 3.1416f;
-
         public float PMax = 3f;     // rad/s
         public float QMax = 0.9f;   // rad/s
-        public float NzMax = 9f;    // g
+        public float NzMax = 9f;    // g: the jet's own limit
+        public float GScale = 1f;   // the limit override's multiplier on it
+
+        /// <summary>The g limit in force: <see cref="NzMax"/> times <see cref="GScale"/>, at most <see cref="PilotG"/>.</summary>
+        public float NzLimit => Math.Max(NzMax, Math.Min(NzMax * GScale, PilotG));
+
+        /// <summary>The game hurts the pilot above 20 g (PHASE0_FACTS); a raised limit stays under it.</summary>
+        public const float PilotG = 19f;
         public float RMax = 0.35f;  // rad/s at full pedal
         public float KBeta = 1.5f;  // 1/s: yaw rate per radian of sideslip
         public float Tau = 0.08f;   // s: command pre-filter
@@ -72,7 +72,7 @@ namespace AutopilotMod.Fbw.Control
         /// The full-stick pitch rate (rad/s): the rate of a steady pull at <see cref="NzMax"/> g, at most <see cref="QMax"/>.
         /// With Stability Assist off, <see cref="QMax"/> at every speed (stock does the same below 1.2 x corner dynamic pressure).
         /// </summary>
-        public float FullStickPitch(float speed, bool assist) => assist ? Math.Min(QMax, NzMax * G / Math.Max(speed, 30f)) : QMax;
+        public float FullStickPitch(float speed, bool assist) => assist ? Math.Min(QMax, NzLimit * G / Math.Max(speed, 30f)) : QMax;
 
         /// <summary>
         /// The stick's targets (rad/s), before the envelope: roll about the flight path <paramref name="psT"/>, pitch rate

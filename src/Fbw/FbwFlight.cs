@@ -74,7 +74,7 @@ namespace AutopilotMod.Fbw
             {
                 Computer.Law.NzMax = StockG(stock);
                 Computer.Law.QMax = StockQ(stock);
-                Computer.Law.PMax = Math.Min(0.5f * StockP(stock), RateLaw.RollCap);
+                Computer.Law.PMax = 0.5f * StockP(stock); // what the yaw can't coordinate, FlightComputer.CoordinatedRoll takes off
             }
         }
 
@@ -207,6 +207,15 @@ namespace AutopilotMod.Fbw
             curve.Update(state.Alpha, GameAero.V(state.VCg), right, up, mass.Mass * 9.81f, aero.Lift, aero.Drag, dt);
 
             FlightComputer fc = Computer;
+            V3 flow = GameAero.V(state.VCg);
+            float speed = flow.Magnitude;
+            if (speed > 1f)
+            {
+                V3 rollAxis = flow / -speed; // right roll about the flight path, in Unity's left-handed sign
+                V3 omega = GameAero.V(link.Aircraft.rb.angularVelocity);
+                fc.RollAccel = FlightComputer.ToAero(rot, FlightComputer.RollResponse(mass.Inertia, curve.RateMoment(rollAxis), omega, rollAxis));
+            }
+            else fc.RollAccel = V3.Zero;
             fc.LiftSlope = curve.Known ? curve.Slope : 0f;
             fc.AlphaMax = curve.AlphaMax;
             fc.AlphaMin = curve.AlphaMin;
@@ -214,11 +223,27 @@ namespace AutopilotMod.Fbw
             float iPitch = V3.Dot(right, MassProps.Mul(mass.Inertia, right)), iYaw = V3.Dot(up, MassProps.Mul(mass.Inertia, up));
             float iRoll = V3.Dot(fwd, MassProps.Mul(mass.Inertia, fwd));
             fc.CouplingGain = iPitch > 0f ? (iYaw - iRoll) / iPitch : 0f;
-            fc.Assist = link.Aircraft.flightAssist && !LimitOverride;
+            // the limit override: no AoA limit (as Stability Assist off: full pitch rate) or the lift peak's, and the g limit raised
+            bool peak = LimitOverride && OverridePeak;
+            fc.Assist = link.Aircraft.flightAssist && !(LimitOverride && !OverridePeak);
+            if (peak)
+            {
+                fc.AlphaMax = Math.Max(curve.AlphaMax, curve.PeakPos);
+                fc.AlphaMin = Math.Min(curve.AlphaMin, curve.PeakNeg);
+            }
+            fc.Law.GScale = LimitOverride ? OverrideG : 1f;
+            fc.SlipAllowance = SlipAllowance;
         }
 
-        /// <summary>The pilot holds the limit-override key: flies as with Stability Assist off (no AoA limit, g still held, full pitch rate).</summary>
+        /// <summary>The pilot holds the limit-override key; set by the controller each tick with the settings below.</summary>
         public bool LimitOverride;
+
+        /// <summary>Override settings: AoA limit raised to the lift peak (else none), and the g limit's multiplier.</summary>
+        public bool OverridePeak;
+        public float OverrideG = 1f;
+
+        /// <summary>Sideslip (rad) a roll may build before the coordinated-roll limit takes over.</summary>
+        public float SlipAllowance;
 
         /// <summary>The envelope's airframe numbers, for the logs and the display.</summary>
         public LiftCurve Curve => curve;

@@ -12,7 +12,8 @@ namespace AutopilotMod
     /// - V-N: load factor against airspeed. The boundary is the lift at the AoA limit (scaled with airspeed squared) up to the
     ///   g limit; faint, the peak-lift boundary the limit override reaches. The dot is the jet now, with a 3 s trail.
     /// - LIFT: load factor against AoA at the current airspeed, the AoA limits and the governor's 0.5 s AoA forecast.
-    /// Below: AoA and g against their limits, sideslip, corner speed, and the turn rate and radius the envelope gives now.
+    /// Below: AoA and g against their limits, sideslip against its allowance, corner speed, the turn rate the envelope gives now and the
+    /// steady roll rate the yaw can coordinate. Header buttons set the limit override (AoA free or to the lift peak, its g) and the roll's sideslip allowance.
     /// </summary>
     internal sealed class EnvelopePage : MfdFrame
     {
@@ -26,7 +27,13 @@ namespace AutopilotMod
         private int trailCount, trailAt;
         private float nextTrail;
 
-        public EnvelopePage(ApSettings cfg) : base(cfg.EnvelopeSize, cfg.EnvelopeX, cfg.EnvelopeY) { }
+        private readonly ApSettings cfg;
+        private static readonly float[] GSteps = { 1f, 1.25f, 1.5f, 2f }, SlipSteps = { 0f, 3f, 6f };
+
+        public EnvelopePage(ApSettings cfg) : base(cfg.EnvelopeSize, cfg.EnvelopeX, cfg.EnvelopeY)
+        {
+            this.cfg = cfg;
+        }
 
         protected override float Bezel => 0.025f;
 
@@ -36,19 +43,31 @@ namespace AutopilotMod
 
         public bool Visible => Flight != null;
 
-        private Rect TabRect(int i) => Sc(0.02f + 0.17f * i, 0.015f, 0.16f, 0.075f);
+        // header touch buttons: 0-1 the views, 2-4 the override's AoA mode and g, and the roll's sideslip allowance
+        private Rect TabRect(int i) => i < 2 ? Sc(0.02f + 0.14f * i, 0.015f, 0.13f, 0.075f) : Sc(0.31f + 0.23f * (i - 2), 0.015f, 0.22f, 0.075f);
 
         protected override bool ScreenMouse(Event e)
         {
             if (e.type != EventType.MouseDown || e.button != 0) return false;
-            for (int i = 0; i < 2; i++)
+            for (int i = 0; i < 5; i++)
             {
                 if (!TabRect(i).Contains(e.mousePosition)) continue;
-                liftView = i == 1;
+                if (i < 2) liftView = i == 1;
+                else if (i == 2) cfg.OverrideAoa.Value = cfg.OverrideAoa.Value == OverrideAoa.NoLimit ? OverrideAoa.LiftPeak : OverrideAoa.NoLimit;
+                else if (i == 3) cfg.OverrideG.Value = Next(GSteps, cfg.OverrideG.Value);
+                else cfg.RollSideslip.Value = Next(SlipSteps, cfg.RollSideslip.Value);
                 e.Use();
                 return true;
             }
             return false;
+        }
+
+        // the step after the one at or above v, round to the first
+        private static float Next(float[] steps, float v)
+        {
+            foreach (float s in steps)
+                if (s > v + 0.01f) return s;
+            return steps[0];
         }
 
         protected override void DrawScreen()
@@ -63,7 +82,7 @@ namespace AutopilotMod
             LiftCurve c = f.Curve;
             Fbw.Control.FlightState s = fc.Last;
             CommandGovernor gov = fc.Governor;
-            float nzMax = fc.Law.NzMax, nzMin = -FlightComputer.NegativeG * nzMax;
+            float nzMax = fc.Law.NzLimit, nzMin = -FlightComputer.NegativeG * nzMax;
 
             // lift per airspeed squared (g per (m/s)^2) at the AoA limits and at the lift peaks
             float k = c.SweepWeight > 0f && c.SweepSpeed > 1f ? 1f / (c.SweepWeight * c.SweepSpeed * c.SweepSpeed) : 0f;
@@ -82,21 +101,25 @@ namespace AutopilotMod
                 trailCount = Math.Min(Trail, trailCount + 1);
             }
 
-            // ---- header: tabs and status ----
-            string[] tabs = { "V-N", "LIFT" };
-            for (int i = 0; i < 2; i++)
+            // ---- header: view tabs, then the settings (their buttons cycle them) ----
+            string[] tabs =
+            {
+                "V-N", "LIFT", cfg.OverrideAoa.Value == OverrideAoa.LiftPeak ? "OVR PEAK" : "OVR FREE",
+                $"OVR G{cfg.OverrideG.Value:0.##}", $"SLIP {cfg.RollSideslip.Value:0}",
+            };
+            for (int i = 0; i < 5; i++)
             {
                 Rect r = TabRect(i);
-                bool on = liftView == (i == 1);
+                bool on = i < 2 && liftView == (i == 1);
                 if (on) Fill(r, Green, 0.01f * S);
-                else Border(r, GreenDim, Mathf.Max(1f, 0.004f * S), 0.01f * S);
-                Text(r, tabs[i], 0.036f, on ? Black : GreenDim, TextAnchor.MiddleCenter, false);
+                else Border(r, i < 2 ? GreenDim : Green, Mathf.Max(1f, 0.004f * S), 0.01f * S);
+                Text(r, tabs[i], 0.03f, on ? Black : i < 2 ? GreenDim : Green, TextAnchor.MiddleCenter, false);
             }
             bool governing = Math.Abs(gov.Governed - gov.Wanted) > 0.01f || Math.Abs(gov.GovernedRoll - gov.WantedRoll) > 0.01f;
             string status = f.LimitOverride ? "AOA OVRD" : !limited ? "ASSIST OFF" : governing ? "LIMITING" : "";
             Color statusCol = f.LimitOverride || !limited ? Amber : Green;
             bool blink = f.LimitOverride && Mathf.Repeat(Time.unscaledTime, 0.6f) > 0.4f;
-            if (status.Length > 0 && !blink) Text(Sc(0.38f, 0.015f, 0.6f, 0.075f), status, 0.04f, statusCol, TextAnchor.MiddleRight);
+            if (status.Length > 0 && !blink) Text(Sc(0.4f, 0.125f, 0.56f, 0.06f), status, 0.036f, statusCol, TextAnchor.MiddleRight);
 
             // ---- plot ----
             Rect plot = Sc(0.1f, 0.12f, 0.87f, 0.58f);
@@ -144,10 +167,12 @@ namespace AutopilotMod
             float cornerV = kLimPos > 0f ? Mathf.Sqrt(nzMax / kLimPos) : 0f;
             Readout(0, 0, "AOA", $"{aoa:0.0}", limited ? $"/{fc.AlphaMax * Deg:0}" : "/--", aoa > fc.AlphaMax * Deg - 1f || !limited);
             Readout(0, 1, "G", $"{s.Nz:0.0}", $"/{nzMax:0.0}", s.Nz > nzMax - 0.5f || s.Nz < nzMin + 0.5f);
-            Readout(0, 2, "BETA", $"{s.Beta * Deg:0.0}", "", Math.Abs(s.Beta * Deg) > 5f);
+            Readout(0, 2, "BETA", $"{s.Beta * Deg:0.0}", $"/{cfg.RollSideslip.Value:0}", Math.Abs(s.Beta * Deg) > cfg.RollSideslip.Value + 1f);
             Readout(1, 0, "CRNR", cornerV > 0f ? $"{Units.Speed(cornerV):0}" : "--", "", false);
             Readout(1, 1, "TURN", lateral > 0f ? $"{lateral / Mathf.Max(v, 1f) * Deg:0.0}" : "--", "°/S", false);
-            Readout(1, 2, "RAD", lateral > 0f ? $"{Units.Alt(v * v / lateral):0}" : "--", Units.AltUnit, false);
+            // the steady roll rate the yaw can coordinate now (the slower side)
+            float roll = Mathf.Min(fc.RollHi, -fc.RollLo) * Deg;
+            Readout(1, 2, "ROLL", roll < 900f ? $"{Mathf.Max(0f, roll):0}" : "--", "°/S", roll < 30f);
         }
 
         private void Readout(int col, int row, string label, string value, string unit, bool warn)

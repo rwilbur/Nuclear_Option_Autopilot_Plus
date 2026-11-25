@@ -208,7 +208,7 @@ internal sealed class FbwBench
         }
         SetFlight(speed, 0.5f * (lo + hi));
         Fc = new FlightComputer(Slots);
-        Fc.Law.PMax = Math.Min(PMax, RateLaw.RollCap);
+        Fc.Law.PMax = PMax;
         Fc.Law.QMax = QMax;
         Fc.Law.NzMax = GLimit;
         omegaDot = V3.Zero;
@@ -280,6 +280,8 @@ internal sealed class FbwBench
     {
         V3 vb = rot.Inverse * vel, cg = mass.Cg;
         FillCurve(vb, s.Alpha);
+        V3 rollAxis = vb / -vb.Magnitude; // right roll about the flight path, in Unity's left-handed sign
+        Fc.RollAccel = Body(FlightComputer.RollResponse(mass.Inertia, Curve.RateMoment(rollAxis), omega, rollAxis));
         Fc.LiftSlope = Curve.Slope;
         Fc.PitchStiffness = Body(MassProps.Solve(mass.Inertia, Curve.MomentSlope)).Y;
         Fc.CouplingGain = (float)((mass.Inertia[4] - mass.Inertia[8]) / mass.Inertia[0]); // body frame: x pitch, y yaw, z roll

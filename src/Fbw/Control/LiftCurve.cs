@@ -146,6 +146,18 @@ namespace AutopilotMod.Fbw.Control
         }
 
         /// <summary>
+        /// d(aero moment about the CG)/d(turn rate about <paramref name="axis"/>) (N m per rad/s, the parts' frame and the game's sign;
+        /// <paramref name="axis"/> a unit vector), with every surface where it is now: the airframe's rate damping. Call after <see cref="Update"/>.
+        /// </summary>
+        public V3 RateMoment(V3 axis)
+        {
+            if (liftChart == null) return V3.Zero;
+            const float h = 0.1f; // rad/s
+            V3 up = Response(Parts, Q4.Identity, axis * h, out _), down = Response(Parts, Q4.Identity, axis * -h, out _);
+            return (up - down) / (2f * h);
+        }
+
+        /// <summary>
         /// The aero moment about the CG (returned) and force of <paramref name="parts"/>, with every part's air turned by <paramref name="turn"/>
         /// and the body turning at <paramref name="omega"/> more (the game's frame and sign).
         /// </summary>

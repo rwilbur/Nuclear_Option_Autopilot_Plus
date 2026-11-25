@@ -38,6 +38,8 @@ namespace AutopilotMod.Fbw.Control
         public readonly Allocator Alloc;
         public readonly float[] Command; // per slot, the position commanded this tick
         public float NuRoll, NuPitch, NuYaw; // last ν (rad/s²)
+        public float RequestYaw; // last increment asked of stability yaw (rad/s²)
+        public float GotPitch;   // last increment pitch got (rad/s²)
         public float UnmetRoll, UnmetPitch, UnmetYaw; // Δν the effectors could not give (rad/s², stability axes)
 
         private readonly float[] uf;
@@ -120,10 +122,12 @@ namespace AutopilotMod.Fbw.Control
             }
             float dvB = IncrementGain * (NuRoll - wdP), dvQ = IncrementGain * (NuPitch - wdQ), dvY = IncrementGain * (NuYaw - wdR);
             float dvP = dvB * ca + dvY * sa, dvR = dvY * ca - dvB * sa;
+            RequestYaw = dvR;
             a.Solve(dvP, dvQ, dvR);
             a.Achieved(out float gp, out float gq, out float gr);
             UnmetRoll = dvP - gp;
             UnmetPitch = dvQ - gq;
+            GotPitch = gq;
             UnmetYaw = dvR - gr;
             for (int j = 0; j < count; j++) Command[j] = uf[j] + a.Du[j];
         }
