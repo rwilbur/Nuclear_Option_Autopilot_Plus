@@ -26,6 +26,7 @@ namespace AutopilotMod
         private MfdPage mfd;
         private RadarCoveragePage radarPage;
         private GunHeatPage gunHeat;
+        private EnvelopePage envelope;
         private Fbw.AirframeExport airframeExport;
         private WebMirror mirror;
         private DisconnectTone tone;
@@ -56,9 +57,10 @@ namespace AutopilotMod
             mfd = new MfdPage(cfg, ap, gpws);
             radarPage = new RadarCoveragePage(cfg, ap) { Report = Report };
             gunHeat = new GunHeatPage(cfg, Logger);
+            envelope = new EnvelopePage(cfg);
             airframeExport = new Fbw.AirframeExport(cfg.ExportAirframes, Logger);
-            Fbw.FbwController.Current = new Fbw.FbwController(cfg.FbwMode, cfg.FbwTelemetry, Logger);
-            mirror = new WebMirror(cfg, Logger, Report, ap, mfd, radarPage, gunHeat);
+            Fbw.FbwController.Current = new Fbw.FbwController(cfg.FbwMode, cfg.FbwTelemetry, cfg.KeyLimitOverride, Logger);
+            mirror = new WebMirror(cfg, Logger, Report, ap, mfd, radarPage, gunHeat, envelope);
             FlightPlanner.Init(Logger, cfg);
             ap.ApDisconnected += () =>
             {
@@ -373,6 +375,7 @@ namespace AutopilotMod
                 mfd.DrawPullUp();
             if (radarPage.Visible) radarPage.OnGUI(cmd => Execute(cmd, false));
             if (cfg.MfdVisible.Value && gunHeat.Visible) gunHeat.OnGUI(cmd => { });
+            if (cfg.MfdVisible.Value && envelope.Visible) envelope.OnGUI(cmd => { });
             if (cfg.MfdVisible.Value)
                 mfd.OnGUI(cmd =>
                 {

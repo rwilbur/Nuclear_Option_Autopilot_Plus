@@ -50,6 +50,7 @@ namespace AutopilotMod
         private readonly FlightController ap;
         private readonly RadarCoveragePage map;
         private readonly GunHeatPage gunHeat;
+        private readonly EnvelopePage envelope;
         private readonly MfdFrame[] pages;
         private readonly RenderTexture[] rts;
         // Encoded frames live in a few reused buffers per page (no per-frame garbage: a GC pass over
@@ -89,7 +90,7 @@ namespace AutopilotMod
         // thread pool, so it never competes with the game's worker threads.
         private readonly BlockingCollection<Action> encodeJobs = new BlockingCollection<Action>();
 
-        public WebMirror(ApSettings cfg, ManualLogSource log, Action<string, bool> report, FlightController ap, MfdPage apPage, RadarCoveragePage map, GunHeatPage gunHeat)
+        public WebMirror(ApSettings cfg, ManualLogSource log, Action<string, bool> report, FlightController ap, MfdPage apPage, RadarCoveragePage map, GunHeatPage gunHeat, EnvelopePage envelope)
         {
             this.cfg = cfg;
             this.log = log;
@@ -97,7 +98,8 @@ namespace AutopilotMod
             this.ap = ap;
             this.map = map;
             this.gunHeat = gunHeat;
-            pages = new MfdFrame[] { apPage, map, gunHeat };
+            this.envelope = envelope;
+            pages = new MfdFrame[] { apPage, map, gunHeat, envelope };
             rts = new RenderTexture[pages.Length];
             frames = new Frame[pages.Length][];
             current = new Frame[pages.Length];
@@ -131,7 +133,8 @@ namespace AutopilotMod
 
         /// <summary>
         /// Page 0, the A/P MFD: square. Page 1, the map: bezel-less at the browser window's shape,
-        /// MapResolution on its long side. Page 2, gun heat: square, half the A/P's size. All fit inside the game window.
+        /// MapResolution on its long side. Page 2, gun heat: square, half the A/P's size.
+        /// Page 3, the flight envelope: square, the A/P's size. All fit inside the game window.
         /// </summary>
         private Vector2Int Size(int page)
         {
@@ -257,7 +260,7 @@ namespace AutopilotMod
             {
                 nextTargets = Time.unscaledTime + 0.25f;
                 // built in two halves: a failure in one (logged once) leaves the other on the page
-                targetsJson = "{\"t\":" + Safely(TargetPanel.Json, "{\"filters\":[],\"selected\":[],\"contacts\":[]}") + ",\"m\":" + Safely(map.Json, "{\"wps\":[]}") + ",\"g\":" + (gunHeat.Visible ? "true" : "false") + "}";
+                targetsJson = "{\"t\":" + Safely(TargetPanel.Json, "{\"filters\":[],\"selected\":[],\"contacts\":[]}") + ",\"m\":" + Safely(map.Json, "{\"wps\":[]}") + ",\"g\":" + (gunHeat.Visible ? "true" : "false") + ",\"e\":" + (envelope.Visible ? "true" : "false") + "}";
             }
         }
 
@@ -740,6 +743,8 @@ img{display:block;touch-action:none;user-select:none;-webkit-user-drag:none;back
 #m0{width:var(--s,360px);height:var(--s,360px)}
 #gh{left:8px;top:400px}
 #m2{width:var(--s,180px);height:var(--s,180px)}
+#ev{left:380px;top:8px}
+#m3{width:var(--s,300px);height:var(--s,300px)}
 #cp{right:8px;top:8px;width:min(360px,calc(100vw - 16px))}
 #cp .body{overflow-y:auto;padding:4px 8px 8px}
 .row{margin:0 0 4px}
@@ -768,6 +773,8 @@ input{font:inherit;width:9ch;margin:1px;padding:3px 5px;min-height:20px;backgrou
 <img id=""m0"" alt=""A/P MFD""></div>
 <div id=""gh"" class=""win"" hidden><div class=""bar""><span>GUN HEAT</span><button class=""act"" data-z=""0.87"" title=""Smaller"">&minus;</button><button class=""act"" data-z=""1.15"" title=""Bigger"">+</button><button class=""act mn"" title=""Minimise"">_</button></div>
 <img id=""m2"" alt=""Gun heat""></div>
+<div id=""ev"" class=""win"" hidden><div class=""bar""><span>ENVELOPE</span><button class=""act"" data-z=""0.87"" title=""Smaller"">&minus;</button><button class=""act"" data-z=""1.15"" title=""Bigger"">+</button><button class=""act mn"" title=""Minimise"">_</button></div>
+<img id=""m3"" alt=""Flight envelope""></div>
 <div id=""cp"" class=""win""><div class=""bar""><span>MAP / ROUTE / TARGETS</span><button class=""act mn"" title=""Minimise"">_</button></div><div class=""body"">
 <span class=""gh"">RADARS SHOWN &middot; TARGET HEIGHT</span>
 <div class=""row""><button data-c=""RdrAll"" data-m=""ALL"">ALL</button><button data-c=""RdrOwn"" data-m=""OWN"">OWN</button><button data-c=""RdrEnemy"" data-m=""ENMY"">ENMY</button><button class=""act"" data-c=""RdrTgt"" id=""tgt"">TGT</button><button data-c=""RdrEyes"" id=""eyes"" title=""Visual spotting coverage"">EYES</button><button data-c=""RdrSam"" id=""sam"" title=""Anti-air engagement rings"">SAM</button></div>
@@ -810,6 +817,7 @@ function refresh() {
     last = t;
     const all = JSON.parse(t), s = all.t, m = all.m;
     if ($('gh').hidden === !!all.g) { $('gh').hidden = !all.g; loads[2](); } // only in jets whose gun can overheat
+    if ($('ev').hidden === !!all.e) { $('ev').hidden = !all.e; loads[3](); } // only while the mod's fly-by-wire flies
     for (const b of document.querySelectorAll('button[data-m]')) b.className = b.dataset.m === m.mode ? 'on' : '';
     $('tgt').textContent = m.tgt; $('folw').className = m.folw ? 'on' : 'act';
     $('rng').textContent = `RNG ${m.rng} KM`; $('rcs').textContent = m.rcs;
@@ -893,7 +901,7 @@ const tab = Math.random().toString(36).slice(2, 12); // lets the game end this t
 const MAP_VIDEO = __MAPVIDEO__;
 // streams: the map is rendered at the window's shape; a minimised or hidden window stops its stream (the game stops rendering it)
 const loads = [];
-for (const p of MAP_VIDEO ? [0, 1, 2] : [0, 2]) {
+for (const p of MAP_VIDEO ? [0, 1, 2, 3] : [0, 2, 3]) {
   const img = $('m' + p), win = img.closest('.win');
   const load = loads[p] = () => {
     if (win && (win.hidden || win.classList.contains('min'))) return img.removeAttribute('src');

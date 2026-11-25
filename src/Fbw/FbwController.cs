@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using UnityEngine;
@@ -37,6 +38,7 @@ namespace AutopilotMod.Fbw
 
         private readonly ConfigEntry<FbwMode> mode;
         private readonly ConfigEntry<bool> telemetry;
+        private readonly ConfigEntry<KeyboardShortcut> overrideKey;
         private readonly ManualLogSource log;
 
         private AircraftLink link;
@@ -48,10 +50,11 @@ namespace AutopilotMod.Fbw
         private AeroCheck check;         // phase-2 diagnostics, with telemetry
         private Aircraft failed;         // the aircraft the FBW faulted on: stays stock until it is replaced
 
-        public FbwController(ConfigEntry<FbwMode> mode, ConfigEntry<bool> telemetry, ManualLogSource log)
+        public FbwController(ConfigEntry<FbwMode> mode, ConfigEntry<bool> telemetry, ConfigEntry<KeyboardShortcut> overrideKey, ManualLogSource log)
         {
             this.mode = mode;
             this.telemetry = telemetry;
+            this.overrideKey = overrideKey;
             this.log = log;
         }
 
@@ -60,6 +63,9 @@ namespace AutopilotMod.Fbw
 
         /// <summary>Full mode is flying the held jet.</summary>
         public bool Flying => flying;
+
+        /// <summary>Full mode's computer while it flies the held jet, else null (the envelope display reads it).</summary>
+        public FbwFlight Flight => flying ? flight : null;
 
         /// <summary>Start of the physics tick, before JobManager.ScheduleJobs.</summary>
         public void PreJobs()
@@ -85,6 +91,8 @@ namespace AutopilotMod.Fbw
                 {
                     link.HoldSurfaces();
                     link.HoldEngines();
+                    KeyboardShortcut k = overrideKey.Value;
+                    flight.LimitOverride = k.MainKey != KeyCode.None && Input.GetKey(k.MainKey) && k.Modifiers.All(Input.GetKey);
                     flight.Tick(state, dt);
                 }
                 else if (mode.Value != FbwMode.Off)

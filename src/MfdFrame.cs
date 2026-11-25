@@ -164,10 +164,16 @@ namespace AutopilotMod
         // Mouse
         // =====================================================================
         private const float MinSize = 240f;
-        private const float Bezel = 0.07f; // bezel width as a fraction of the MFD size
+        /// <summary>Bezel width as a fraction of the MFD size. Under <see cref="SlimBezel"/>: a thin edge, no screws (a page without OSBs).</summary>
+        protected virtual float Bezel => 0.07f;
+        protected const float SlimBezel = 0.05f;
 
         /// <summary>Bottom-right corner of the bezel: drag it to resize.</summary>
-        private Rect GripRect() => new Rect(frame.xMax - Bezel * S, frame.yMax - Bezel * S, Bezel * S, Bezel * S);
+        private Rect GripRect()
+        {
+            float g = Mathf.Max(Bezel, 0.07f) * S; // a slim page's grip reaches into its display's corner
+            return new Rect(frame.xMax - g, frame.yMax - g, g, g);
+        }
 
         private void SavePosition(Vector2 topLeft)
         {
@@ -303,7 +309,8 @@ namespace AutopilotMod
                 new Vector2(frame.x + inset, frame.y + inset), new Vector2(frame.xMax - inset, frame.y + inset),
                 new Vector2(frame.x + inset, frame.yMax - inset), new Vector2(frame.xMax - inset, frame.yMax - inset)
             };
-            for (int i = 0; i < (cursor ? 3 : 4); i++)
+            bool slim = Bezel < SlimBezel;
+            for (int i = 0; i < (slim ? 0 : cursor ? 3 : 4); i++)
             {
                 Vector2 c = screws[i];
                 Rect sr = new Rect(c.x - sw * 0.5f, c.y - sw * 0.5f, sw, sw);
@@ -339,7 +346,7 @@ namespace AutopilotMod
                 if (hover) Border(body, GreenDim, 1f, 0.008f * S);
             }
 
-            if (cursor)
+            if (cursor && !slim)
                 Text(new Rect(frame.x, frame.y + 0.005f * S, frame.width, 0.05f * S), "CRSR", 0.022f, GreenDim, TextAnchor.UpperCenter, false);
         }
 

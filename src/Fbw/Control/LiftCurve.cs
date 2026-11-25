@@ -50,6 +50,19 @@ namespace AutopilotMod.Fbw.Control
         /// <summary>The limits have been found at least once.</summary>
         public bool Known { get; private set; }
 
+        /// <summary>The latest sweep's airspeed (m/s) and weight (N): its lift scales with the airspeed squared.</summary>
+        public float SweepSpeed { get; private set; }
+        public float SweepWeight { get; private set; }
+
+        /// <summary>The latest sweep's lift (N, across the flight path) at <paramref name="alpha"/> (rad), interpolated; 0 before the first sweep.</summary>
+        public float LiftAt(float alpha)
+        {
+            if (!Known) return 0f;
+            float x = Math.Max(0f, Math.Min(sweep.Length - 1.001f, alpha / Deg2Rad - SweepLo));
+            int k = (int)x;
+            return sweep[k] + (x - k) * (sweep[k + 1] - sweep[k]);
+        }
+
         private readonly float[] sweep = new float[(int)(SweepHi - SweepLo) + 1];
         private readonly Plate.Input[] clean;
         private int sinceSweep;
@@ -121,6 +134,8 @@ namespace AutopilotMod.Fbw.Control
                 AlphaMax = maxTarget;
                 AlphaMin = minTarget;
             }
+            SweepSpeed = flow.Magnitude;
+            SweepWeight = weight;
             PeakPos = (SweepLo + iPos) * Deg2Rad;
             PeakNeg = (SweepLo + iNeg) * Deg2Rad;
             Known = true;

@@ -214,8 +214,11 @@ namespace AutopilotMod.Fbw
             float iPitch = V3.Dot(right, MassProps.Mul(mass.Inertia, right)), iYaw = V3.Dot(up, MassProps.Mul(mass.Inertia, up));
             float iRoll = V3.Dot(fwd, MassProps.Mul(mass.Inertia, fwd));
             fc.CouplingGain = iPitch > 0f ? (iYaw - iRoll) / iPitch : 0f;
-            fc.Assist = link.Aircraft.flightAssist;
+            fc.Assist = link.Aircraft.flightAssist && !LimitOverride;
         }
+
+        /// <summary>The pilot holds the limit-override key: flies as with Stability Assist off (no AoA limit, g still held, full pitch rate).</summary>
+        public bool LimitOverride;
 
         /// <summary>The envelope's airframe numbers, for the logs and the display.</summary>
         public LiftCurve Curve => curve;

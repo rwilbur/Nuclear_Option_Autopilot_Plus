@@ -216,6 +216,11 @@ Choices, and the evidence for them:
 - Known: with a deliberate extra tick of delay, the Revoker at 110 m/s still overshoots its AoA limit by 4.7 deg (under
   its lift peak). The game's timing has no such tick (phase 1). Solve cost: up to ~200 simulations of 90 ticks, only on
   ticks where the pilot's command would break a limit. To be timed in phase 7.
+- Envelope display (`src/EnvelopePage.cs`, also in the web mirror): a V-n diagram from the lift curve (lift at the AoA limit
+  scaled with airspeed squared, up to the g limit; faint, the peak-lift boundary) and a lift-vs-AoA view, with AoA, g,
+  sideslip, corner speed and the turn rate and radius available now.
+- Limit override (`FlyByWire.LimitOverride`, right mouse button by default): while held, the FBW flies as with
+  Stability Assist off, with no AoA limit and full pitch rate. The g limit is still held.
 
 Bench: a rigid-body simulator built on the effector models and each jet's export. It adds deliberate model
 error, delay, servo lag and part flex, because a plant that matches the model exactly makes everything look

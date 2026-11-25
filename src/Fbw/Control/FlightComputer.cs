@@ -109,8 +109,12 @@ namespace AutopilotMod.Fbw.Control
 
         public float[] Command => Indi.Command;
 
+        /// <summary>The state of the latest <see cref="Step"/>, for the display.</summary>
+        public FlightState Last;
+
         public void Step(float stickPitch, float stickRoll, float stickYaw, in FlightState s, float dt)
         {
+            Last = s;
             Law.Targets(stickPitch, stickRoll, stickYaw, s.Speed, s.Beta, s.Bank, s.Pitch, Assist, out float psT, out float qT, out float rYaw);
             CommandGovernor gov = Governor;
             gov.AlphaMax = AlphaMax;

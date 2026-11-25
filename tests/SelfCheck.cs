@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using AutopilotMod;
 using AutopilotMod.Fbw.Model;
@@ -617,6 +617,9 @@ internal static class SelfCheck
             b.Start(150f);
             var (max, min, pPos, pNeg) = b.Limits();
             Console.WriteLine($"envelope {b.Unit,-15} AoA limits {max:F0} / {min:F0} deg (lift peaks {pPos:F0} / {pNeg:F0}; stock limiter {b.StockAlphaLimit:F0})");
+            float peak = b.Curve.LiftAt(b.Curve.PeakPos);
+            Check(peak > 0f && Math.Abs(b.Curve.LiftAt(b.Curve.AlphaMax) - AutopilotMod.Fbw.Control.LiftCurve.LiftShare * peak) < 0.03f * peak,
+                  $"{b.Unit}: the display's lift at the AoA limit is {AutopilotMod.Fbw.Control.LiftCurve.LiftShare:P0} of the peak");
         }
         foreach (string jet in jets)
         {

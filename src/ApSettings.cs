@@ -110,6 +110,8 @@ namespace AutopilotMod
         public ConfigEntry<float> RadarOpacity;
         public ConfigEntry<bool> RadarEyes, RadarSams;
         public ConfigEntry<float> GunHeatSize, GunHeatX, GunHeatY;
+        public ConfigEntry<float> EnvelopeSize, EnvelopeX, EnvelopeY;
+        public ConfigEntry<KeyboardShortcut> KeyLimitOverride;
 
         // ---- web mirror ----
         public ConfigEntry<bool> MirrorEnabled;
@@ -230,10 +232,14 @@ namespace AutopilotMod
             GunHeatSize = cfg.Bind(D, "GunHeatSize", 0.22f, "Gun-heat display size as a fraction of screen height. It shows only in aircraft whose gun can overheat.");
             GunHeatX = cfg.Bind(D, "GunHeatPositionX", 0.985f, "Gun-heat display horizontal position (0 = left edge, 1 = right edge). Updated when you drag it.");
             GunHeatY = cfg.Bind(D, "GunHeatPositionY", 0.45f, "Gun-heat display vertical position (0 = top, 1 = bottom). Updated when you drag it.");
+            EnvelopeSize = cfg.Bind(D, "EnvelopeSize", 0.3f, "Flight-envelope display size as a fraction of screen height. It shows while this mod's fly-by-wire (FlyByWire Mode = Full) flies the jet. Tap its V-N / LIFT tabs with the MFD cursor.");
+            EnvelopeX = cfg.Bind(D, "EnvelopePositionX", 0.985f, "Flight-envelope display horizontal position (0 = left edge, 1 = right edge). Updated when you drag it.");
+            EnvelopeY = cfg.Bind(D, "EnvelopePositionY", 0.9f, "Flight-envelope display vertical position (0 = top, 1 = bottom). Updated when you drag it.");
             ShowDebug = cfg.Bind(D, "ShowDebugLine", false, "Show commanded vs actual rates and raw stick outputs on the MFD (useful when tuning).");
 
             FbwMode = cfg.Bind("FlyByWire", "Mode", Fbw.FbwMode.Off, "Fly-by-wire (in development). Off = the game's own fly-by-wire, untouched. Passthrough = test of the takeover: every control surface and jet engine gets its own inputs, copied from the stock ones exactly when the game would read them, so the jet flies exactly as stock. Full = this mod's fly-by-wire flies the jet (above 60 m/s and 5 m; stock below): the stick commands pitch, roll and yaw rates, every surface and vectoring nozzle is moved on its own. Envelope protection: AoA (from the jet's own lift curve) and g (the jet's stock limit, -1/3 of it pushing) are held by a predictive governor that shapes pitch and roll together; with Stability Assist off only g is held, as stock. Roll is capped at 180 deg/s for now.");
             FbwTelemetry = cfg.Bind("FlyByWire", "Telemetry", false, "Development: log flight state, inputs and every surface's and engine's position each physics tick to BepInEx\\FbwLogs\\<aircraft>_<time>.csv (also with Mode = Off).");
+            KeyLimitOverride = cfg.Bind("FlyByWire", "LimitOverride", new KeyboardShortcut(KeyCode.Mouse1), "Hold to lift the fly-by-wire's AoA limit (Mode = Full): it flies as with Stability Assist off, so full stick pulls the most pitch rate with no AoA limit; g is still held. Mouse1 = right mouse button; None = off.");
             ExportAirframes = cfg.Bind("FlyByWire", "ExportAirframes", false, "Development: 2 s after you start flying a jet, write its rigidbodies, aero parts, control surfaces, engines, stock fly-by-wire settings and airfoil charts to BepInEx\\FbwAirframes\\<aircraft>.json (once per spawn). Used to build and check the fly-by-wire's airframe models.");
 
             const string M = "WebMirror";
