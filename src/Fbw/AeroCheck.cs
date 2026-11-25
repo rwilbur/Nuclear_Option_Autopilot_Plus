@@ -63,6 +63,32 @@ namespace AutopilotMod.Fbw
             density = LevelInfo.airDensityChart.ToArray();
             ForceProbe.Start(bodies);
             ForceProbe.Reset(link.Aircraft.rb.position);
+            LogInventory();
+        }
+
+        /// <summary>
+        /// Once per check: every rigidbody of the jet with the flags that decide whether physics counts it,
+        /// and any other rigidbody near the jet (pilot, mounted stores) that the mass sum would miss.
+        /// </summary>
+        private void LogInventory()
+        {
+            var own = new HashSet<Rigidbody>();
+            var sb = new System.Text.StringBuilder("FBW bodies of " + link.Aircraft.definition.unitName + ":");
+            foreach (AeroPart p in parts)
+            {
+                if (p == null || p.rb == null || !own.Add(p.rb)) continue;
+                Rigidbody rb = p.rb;
+                sb.Append($"\n  {rb.name}: {rb.mass:F1} kg, kinematic {rb.isKinematic}, gravity {rb.useGravity}, detached {p.IsDetached()}, drag {rb.drag:F2}/{rb.angularDrag:F2}, joints {rb.GetComponents<Joint>().Length}");
+            }
+            Vector3 at = link.Aircraft.rb.position;
+            foreach (Rigidbody rb in Object.FindObjectsOfType<Rigidbody>())
+            {
+                if (own.Contains(rb) || (rb.position - at).sqrMagnitude > 40f * 40f) continue;
+                Joint j = rb.GetComponent<Joint>();
+                string to = j != null && j.connectedBody != null ? j.connectedBody.name : "-";
+                sb.Append($"\n  NOT COUNTED {rb.name} ({rb.gameObject.GetComponents<Component>().Length} components): {rb.mass:F1} kg, kinematic {rb.isKinematic}, gravity {rb.useGravity}, joint to {to}, {(rb.position - at).magnitude:F1} m away");
+            }
+            log.LogInfo(sb.ToString());
         }
 
         /// <summary>After the aero job finished, before the physics step.</summary>

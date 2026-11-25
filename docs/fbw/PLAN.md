@@ -142,13 +142,34 @@ Choices, and the evidence for them:
 |---|---|---|
 | 0 | Game facts, airframe exporter | ✅ Facts doc written; all 10 jets exported to `tests/airframes/` (25 Nov 2026) |
 | 1 | Adapter + logging + passthrough | ✅ Revoker and Ifrit flights (25 Nov 2026): every surface matched the game's servo model to 0.0001° (`tests/fbw-log-check.js`) |
-| 2 | Effector models checked in game | Modelled vs measured angular acceleration matches across a logged flight, per jet |
+| 2 | Effector models checked in game | ✅ See "Phase 2 findings" below (Compass, Revoker, Ifrit, Medusa, Vagrant flights, 25 Nov 2026) |
 | 3 | INDI + allocator, plain rate laws, Full mode | Bench and game step responses pass the HQ checks on a no-TVC jet, then a TVC jet |
 | 4 | Laws + envelope governor | Full-stick pulls, rolling pulls and releases stay inside limits on every jet |
 | 5 | Capacity limits: damage, stores, engine-out (throttle cut), ground steering | Bench damage cases fly without departure |
 | 6 | Multiplayer mode | Remote view matches (by construction); same laws pass the HQ checks |
 | 7 | Performance: timings, then threading / native if justified | Per-tick cost measured in game, with and without |
 | 8 | Autopilot integration: the A/P commands rates and g directly | A/P tests pass; stock FBW copies removed from the A/P |
+
+### Phase 2 findings
+
+- **The plate model is the game's.** Our plate, evaluated on each part's own job inputs, matches the aero
+  job's force to within 0.001% and the total aero moment to within 0.01% on the Revoker, Ifrit and Vagrant.
+  On the Compass and Medusa it is within 0.1% for 95% of ticks, with rare spikes up to 17%; those are the
+  jets with flow-channeling parts, so our `RotateTowards` probably differs in some edge case (to fix).
+- **The jet is not a perfect rigid body, and INDI doesn't need it to be.**
+  - With every scripted force captured (ForceProbe) and every body counted (inventory: all dynamic, no
+    bodies missed), yaw is predicted almost exactly (R² 0.97–0.999).
+  - But the absolute pitch moment can be off by a load-dependent amount: on the Compass, about 8°/s² per g
+    nose-up that never happens. Neither scripts nor masses explain it. It is most likely the joints:
+    stretched joints apply their equal and opposite forces at different points and leave a net torque.
+  - INDI only uses the change in acceleration a change in deflection causes, and in increments the
+    prediction holds: tick-to-tick gain 0.88–1.07 on every jet and axis.
+  - Roll comes out about 10% lower than the rigid prediction, which the online effectiveness estimate absorbs.
+- **The measured angular acceleration carries joint vibration** on the multi-part jets (the stiff Revoker
+  and Ifrit less so). INDI's filtering of measurement and command is needed, kept the same on both.
+- **More effectors than surfaces and nozzles:** `DuctedThrustSystem` (the Vagrant's nozzles),
+  `ReactionControlSystem` thrusters, and possibly `MagicTorqueController` (docs/fbw/PHASE0_FACTS.md
+  section 5).
 
 Bench: a rigid-body simulator built on the effector models and each jet's export. It adds deliberate model
 error, delay, servo lag and part flex, because a plant that matches the model exactly makes everything look

@@ -123,6 +123,18 @@ that engine's nozzle angles and throttle (the engine-out throttle cut) without a
 `PropFan`, `ConstantSpeedProp`, `TurbineEngine` and `RotorShaft` are other `IEngine`s, to read when a jet that
 uses them is ported.
 
+### Other thrust and torque sources (found by the phase-2 force probe)
+
+- **`DuctedThrustSystem`** drives `JetNozzle`s from an engine's power: the **VT-7 Vagrant's** thrust comes
+  through it, and its `Turbofan` has no nozzles of its own.
+- **`ReactionControlSystem`** (+ `Thruster`): reaction-control jets, with force at each thruster from the
+  inputs. Seen on the Vagrant and the Compass.
+- **`MagicTorqueController`**: adds torque straight from the stick (pitch/yaw/roll × gain) to its acting
+  parts, plus sideslip damping, with power draw. Which jets carry it is not known yet.
+
+All three are control effectors: the FBW has to model them (and drive them per channel) on the jets that
+have them.
+
 ## 6. Other inputs the FCS touches
 
 - `Airbrake`: opens while throttle is exactly 0 (the stock idle airbrake).
