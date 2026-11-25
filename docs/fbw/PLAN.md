@@ -221,6 +221,13 @@ Choices, and the evidence for them:
   sideslip, corner speed and the turn rate and radius available now.
 - Limit override (`FlyByWire.LimitOverride`, right mouse button by default): while held, the FBW flies as with
   Stability Assist off, with no AoA limit and full pitch rate. The g limit is still held.
+- Revoker flight (25 Nov, override in use):
+  - Override held for 8 s in a full pull at 270 m/s: g was held at 8.4, then the AoA ran past the lift peak to 148 deg (a
+    backflip) at 52 deg/s of pitch rate, with speed falling to 60 m/s.
+  - Engines out very high up: the jet bled down to 55 m/s with no lift, its sideslip reached 50 deg and it tumbled
+    (AoA through +-180). That flight condition is outside any envelope. The lift-curve sweeps taken during the tumble pulled the AoA limit
+    from 33 to 15 deg, and it took 9 s to climb back. Fixed: no sweep with more than 10 deg of sideslip.
+  - With the override held, rolling pulls at 480 m/s reached 9.5 g on a 9 g limit, with 12 deg of sideslip.
 
 Bench: a rigid-body simulator built on the effector models and each jet's export. It adds deliberate model
 error, delay, servo lag and part flex, because a plant that matches the model exactly makes everything look

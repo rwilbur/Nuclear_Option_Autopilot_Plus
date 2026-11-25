@@ -224,7 +224,7 @@ internal sealed class FbwBench
     }
 
     // the envelope's airframe numbers, from the same plates (body frame here)
-    private void FillCurve(V3 vb, float alpha)
+    public void FillCurve(V3 vb, float alpha)
     {
         Curve.Count = 0;
         foreach (Part p in parts)

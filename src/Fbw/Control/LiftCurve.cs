@@ -26,6 +26,7 @@ namespace AutopilotMod.Fbw.Control
         private const float SlopeStep = 1.5f;              // deg each side: about one point of the game's 2.8-deg chart grid
         private const float SweepLo = -40f, SweepHi = 60f; // deg of AoA searched
         private const int SweepEvery = 30;                 // ticks: the limits move with configuration, not with the manoeuvre
+        private const float SweepSlipMax = 0.17f;          // sin of the most sideslip (10 deg) a sweep is taken in
 
         public readonly Plate.Input[] Parts;  // live plate inputs
         public readonly V3[] Hinge;           // per part: its surface's hinge (same frame), if it is a control surface
@@ -101,6 +102,9 @@ namespace AutopilotMod.Fbw.Control
                 AlphaMin += Math.Max(-step, Math.Min(step, minTarget - AlphaMin));
             }
             if (Known && ++sinceSweep < SweepEvery) return;
+            // turning sideslipping air about the wing isn't an AoA sweep: the limits fell from 33 to 15 deg in a Revoker tumble (25 Nov).
+            // The limits move with configuration only, so a skipped sweep costs nothing; the next straight tick sweeps.
+            if (Known && Math.Abs(V3.Dot(flow, right)) > SweepSlipMax * flow.Magnitude) return;
             sinceSweep = 0;
 
             for (int i = 0; i < Count; i++)

@@ -620,6 +620,11 @@ internal static class SelfCheck
             float peak = b.Curve.LiftAt(b.Curve.PeakPos);
             Check(peak > 0f && Math.Abs(b.Curve.LiftAt(b.Curve.AlphaMax) - AutopilotMod.Fbw.Control.LiftCurve.LiftShare * peak) < 0.03f * peak,
                   $"{b.Unit}: the display's lift at the AoA limit is {AutopilotMod.Fbw.Control.LiftCurve.LiftShare:P0} of the peak");
+            // a tumble (Revoker, 25 Nov: 50 deg of sideslip at 55 m/s, engines out) must not move the limits: its sweep isn't an AoA sweep
+            float held = b.Curve.AlphaMax;
+            V3 slip = Q4.AngleAxis(50f, new V3(0f, 1f, 0f)) * (Q4.AngleAxis(-10f, new V3(1f, 0f, 0f)).Inverse * new V3(0f, 0f, 150f));
+            for (int i = 0; i < 300; i++) b.FillCurve(slip, 10f / 57.29578f);
+            Check(Math.Abs(b.Curve.AlphaMax - held) < 0.002f, $"{b.Unit}: 5 s of 50 deg sideslip leaves the AoA limit alone ({held * 57.3f:F1} -> {b.Curve.AlphaMax * 57.3f:F1})");
         }
         foreach (string jet in jets)
         {
