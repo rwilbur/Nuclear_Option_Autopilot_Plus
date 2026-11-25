@@ -27,7 +27,8 @@ namespace AutopilotMod.Fbw.Control
         public float Reg = 1e-2f;                         // pull toward neutral with spare freedom, relative to each effector's own (weighted) effect
         public float Damp = 1f;                           // cost of moving this tick, likewise: damps tick-to-tick trading between near-twin effectors
                                                           // (bench 25 Nov: 0.05 let the Compass and Ifrit trade surfaces every tick; 1 keeps tracking and stops it)
-        public float Idle = 0.1f;                         // an effector under this share of the strongest one's effect, on every axis, holds still
+        public int HomeAfter = 6;                         // ticks: an effector idle longer heads for neutral (bench: 6, 12 and 30 alike)
+        public float Idle = 0.1f;                         // an effector under this share of the strongest one's effect, on every axis, holds (or heads back to its unstalled range)
 
         /// <summary>
         /// Axis priority when the effectors can't give everything: what yields first. Roll gives way to yaw
@@ -43,6 +44,7 @@ namespace AutopilotMod.Fbw.Control
         public float UnmetRoll, UnmetPitch, UnmetYaw; // Δν the effectors could not give (rad/s², stability axes)
 
         private readonly float[] uf;
+        private readonly int[] idleTicks;
         private float wdP, wdQ, wdR;
 
         /// <summary>The measured pitch acceleration through the INDI filter (rad/s²), as of the last step.</summary>
@@ -61,6 +63,7 @@ namespace AutopilotMod.Fbw.Control
             Alloc.W[2] = YawWeight;
             Command = new float[slots];
             uf = new float[slots];
+            idleTicks = new int[slots];
         }
 
         public void Reset() => started = false;
@@ -96,8 +99,8 @@ namespace AutopilotMod.Fbw.Control
                 a.B[3 * j] = bp * ca + br * sa;
                 a.B[3 * j + 2] = br * ca - bp * sa;
             }
-            // An effector that barely acts on every axis right now (near stall, or flow it no longer turns) holds still:
-            // the linearisation says little about it and its position would follow round-off. Per axis, against the
+            // An effector that barely acts on every axis right now (near stall, or flow it no longer turns) isn't allocated:
+            // the linearisation says little about it and its position would follow round-off. It holds (or heads back to its unstalled range). Per axis, against the
             // strongest effector on that axis: a single weighted total let a thrust-vectoring nozzle at low speed (huge
             // pitch, pitch weighted 100) idle every surface, roll included (flight logs, Vortex and Ifrit, 25 Nov).
             float s0 = 0f, s1 = 0f, s2 = 0f;
@@ -113,7 +116,13 @@ namespace AutopilotMod.Fbw.Control
                 a.U[j] = uf[j];
                 float b2 = Weighted(a, j);
                 bool idle = Weak(a.B[3 * j], s0) && Weak(a.B[3 * j + 1], s1) && Weak(a.B[3 * j + 2], s2);
-                float lo = idle ? position[j] : reachLo[j], hi = idle ? position[j] : Math.Max(reachHi[j], reachLo[j]);
+                // an idle one holds, but one idle for longer than HomeAfter heads for neutral as fast as its servo goes: held, a stalled
+                // aileron stayed at full deflection and kept a 173 deg/s roll going for another 450 deg after the stick was centred
+                // (Revoker log, 25 Nov). (Homing at once traded with using it: Ifrit full-roll chatter 0.1 -> 15.)
+                idleTicks[j] = idle ? idleTicks[j] + 1 : 0;
+                float home = idleTicks[j] <= HomeAfter ? position[j]
+                    : Math.Max(reachLo[j], Math.Min(Math.Max(reachHi[j], reachLo[j]), neutral[j]));
+                float lo = idle ? home : reachLo[j], hi = idle ? home : Math.Max(reachHi[j], reachLo[j]);
                 a.Lo[j] = lo - uf[j];
                 a.Hi[j] = hi - uf[j];
                 a.Pref[j] = neutral[j];

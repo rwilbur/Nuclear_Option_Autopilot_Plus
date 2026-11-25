@@ -589,7 +589,7 @@ internal static class SelfCheck
                 // the 90 m/s roll only checks tracking: in this bench trim the Vortex is near its pitch limit (nozzle at its stop,
                 // surfaces at 40-54 deg) and two weak surfaces trade every tick while the roll still tracks (known, 25 Nov)
                 float chatter = Math.Max(Math.Max(pull.Chatter, roll.Chatter), full.Chatter);
-                Console.WriteLine($"bench {jet,-15} {c.name,-9} hold {hold.RateRms:F2} deg/s | pull q err {100 * pull.QErr:F0}% over {100 * pull.QOver:F0}% | half roll p err {100 * roll.PErr:F0}% beta {roll.BetaMax:F1} | full roll beta {full.BetaMax:F1} |q| {full.QAbsMax:F1} | 90 m/s roll p err {100 * slow.PErr:F0}% | chatter {chatter:F2}");
+                Console.WriteLine($"bench {jet,-15} {c.name,-9} hold {hold.RateRms:F2} deg/s | pull q err {100 * pull.QErr:F0}% over {100 * pull.QOver:F0}% | half roll p err {100 * roll.PErr:F0}% beta {roll.BetaMax:F1} | full roll beta {full.BetaMax:F1} |q| {full.QAbsMax:F1} | 90 m/s roll p err {100 * slow.PErr:F0}% | chatter {chatter:F2} (pull {pull.Chatter:F1} roll {roll.Chatter:F1} full {full.Chatter:F1})");
                 Check(slow.PErr < (c.name == "model" ? 0.1f : 0.2f), $"bench {jet} {c.name}: a half-stick roll at 90 m/s follows the command ({100 * slow.PErr:F0}% off)");
                 // pass marks: what the 25 Nov tuning shows, with room. Noise and delay are allowed more surface dither.
                 bool nominal = c.name == "model";
@@ -626,6 +626,8 @@ internal static class SelfCheck
             ("roll+pull 150", 150f, 3f, t => (t > 0.2f ? -1f : 0f, t > 0.2f ? 1f : 0f, 0f)),
             ("full roll 90", 90f, 2.5f, t => (0f, t > 0.2f ? 1f : 0f, 0f)),
             ("pull+roll 90", 90f, 3f, t => (t > 0.2f ? -1f : 0f, t > 1f ? 1f : 0f, 0f)),
+            ("roll stop 140", 140f, 4f, t => (0f, t > 0.2f && t < 2f ? -1f : 0f, 0f)),
+            ("roll stop 200", 200f, 4f, t => (0f, t > 0.2f && t < 2f ? -1f : 0f, 0f)),
         };
         foreach (string file in System.IO.Directory.GetFiles(dir, "*.json").OrderBy(x => x))
         foreach (var run in runs)
@@ -633,7 +635,7 @@ internal static class SelfCheck
             var b = new FbwBench(file);
             b.Start(run.speed);
             for (int k = 0; k < 120; k++) b.Step(0f, 0f, 0f);
-            float d = 57.29578f, bMax = 0f, aHi = -999f, aLo = 999f, psMax = 0f;
+            float d = 57.29578f, bMax = 0f, aHi = -999f, aLo = 999f, psMax = 0f, after = 0f;
             int n = (int)(run.secs * 60f);
             for (int k = 0; k < n; k++)
             {
@@ -643,6 +645,7 @@ internal static class SelfCheck
                 bMax = Math.Max(bMax, Math.Abs(s.Beta) * d);
                 aHi = Math.Max(aHi, s.Alpha * d); aLo = Math.Min(aLo, s.Alpha * d);
                 psMax = Math.Max(psMax, Math.Abs(s.P * (float)Math.Cos(s.Alpha) + s.R * (float)Math.Sin(s.Alpha)) * d);
+                if (k / 60f >= 2f) after += (s.P * (float)Math.Cos(s.Alpha) + s.R * (float)Math.Sin(s.Alpha)) * d / 60f; // roll after the stick is centred
                 if (trace == b.Unit + "|" + run.name && k % 3 == 0)
                 {
                     float ca = (float)Math.Cos(s.Alpha), sa = (float)Math.Sin(s.Alpha);
@@ -651,7 +654,7 @@ internal static class SelfCheck
                         (L.P * ca + L.R * sa) * d, (L.R * ca - L.P * sa) * d, I.UnmetRoll * d, I.UnmetYaw * d, b.Fc.RollHi * d, G.GovernedRoll * d, s.Nz, b.Fc.RollAccelHi * d, b.Fc.RollAccelLo * d }.Select(x => x.ToString("F1").PadLeft(7))));
                 }
             }
-            Console.WriteLine($"slip {b.Unit,-17} {run.name,-14} beta {bMax,5:F1}  AoA {aLo,6:F1}..{aHi,5:F1}  roll max {psMax,4:F0} deg/s (cmd {b.Fc.Law.PMax * d:F0})");
+            Console.WriteLine($"slip {b.Unit,-17} {run.name,-14} beta {bMax,5:F1}  AoA {aLo,6:F1}..{aHi,5:F1}  roll max {psMax,4:F0} deg/s (cmd {b.Fc.Law.PMax * d:F0}){(run.name.StartsWith("roll stop") ? $"  rolled {after:F0} deg after release" : "")}");
         }
     }
 

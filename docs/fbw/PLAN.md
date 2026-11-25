@@ -247,6 +247,12 @@ Choices, and the evidence for them:
     190 deg/s instead of 159. At low speed and high AoA more sideslip slows the roll (dihedral), so the limit is real there.
   - Bench, all ten jets: rolling pulls at 150 m/s, 23.5 -> 7.5 deg (Vortex), 18 -> 6 (Ifrit); everything else under 7.
     `FBW_SLIP=1 dotnet run --project tests/SelfCheck.csproj` lists the cases; `FBW_SLIP="<unit>|<run>"` traces one.
+- Flights (Vortex, Ifrit, Revoker, 25 Nov): felt good. One Revoker roll ran another 450 deg after the stick was centred:
+  both ailerons, the rudder and a canard sat frozen at full left-roll deflection for 1.5 s. At 173 deg/s the deflected
+  ailerons were stalled, so the INDI's idle rule (an effector under 10% of the strongest on every axis holds still) held
+  them where they pushed the roll on. Now one idle for over 6 ticks heads for neutral at servo speed. Homing at once traded
+  with using it (Ifrit chatter 0.1 -> 15). Bench roll stop from 140 m/s: Vortex 84 -> 38 deg after release, Ifrit
+  98 -> 76, Revoker 107 -> 93. The rest is servo speed: the ailerons need 0.4 s just to get back to neutral.
 
 Bench: a rigid-body simulator built on the effector models and each jet's export. It adds deliberate model
 error, delay, servo lag and part flex, because a plant that matches the model exactly makes everything look
