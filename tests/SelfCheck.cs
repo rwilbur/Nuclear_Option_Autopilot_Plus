@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using AutopilotMod;
 using AutopilotMod.Fbw.Model;
 
@@ -555,6 +556,159 @@ internal static class SelfCheck
         Check(Near(acc.X, 1f) && Near(acc.Y, 0f), "Euler: I^-1 M");
         acc = mp.AngularAccel(V3.Zero, new V3(1f, 1f, 0f));
         Check(Near(acc.Z, -0.25f) && Near(acc.X, 0f), $"Euler: gyroscopic term -I^-1 (w x Iw) ({acc})");
+
+        CheckFbwControl();
+        CheckFbwBench();
+    }
+
+    /// <summary>Bench flights of real airframes (tests/airframes) with the FBW flying: hold, pull, roll, and the same with the plant off-model.</summary>
+    private static void CheckFbwBench()
+    {
+        string dir = System.IO.Path.Combine(AppContext.BaseDirectory, "airframes");
+        string[] jets = { "FS-12 Revoker", "T_A-30 Compass", "FS-20 Vortex", "KR-67 Ifrit" };
+        var cases = new (string name, float scale, int delay, float noise)[] { ("model", 1f, 0, 0f), ("eff x0.6", 0.6f, 0, 0f), ("eff x1.6", 1.6f, 0, 0f), ("+1 tick", 1f, 1, 0f), ("noise 30", 1f, 0, 30f) };
+        foreach (string jet in jets)
+        {
+            string path = System.IO.Path.Combine(dir, jet + ".json");
+            if (!System.IO.File.Exists(path)) { Check(false, "bench: missing " + path); continue; }
+            var probe = new FbwBench(path);
+            if (!probe.HasDeflections && probe.Asymmetry > 3f)
+            {
+                Console.WriteLine($"bench {jet,-15} skipped: its export caught the surfaces deflected ({probe.Asymmetry:F0} deg left/right mismatch) and predates recorded deflections; re-export it");
+                continue;
+            }
+            foreach (var c in cases)
+            {
+                BenchResult hold = Fly(path, c.scale, c.delay, c.noise, 3f, t => (0f, 0f, 0f));
+                BenchResult pull = Fly(path, c.scale, c.delay, c.noise, 3f, t => (t > 0.2f ? -0.5f : 0f, 0f, 0f));
+                BenchResult roll = Fly(path, c.scale, c.delay, c.noise, 1.5f, t => (0f, t > 0.2f ? 0.5f : 0f, 0f));
+                BenchResult full = Fly(path, c.scale, c.delay, c.noise, 1.5f, t => (0f, t > 0.2f ? 1f : 0f, 0f));
+                float chatter = Math.Max(Math.Max(pull.Chatter, roll.Chatter), full.Chatter);
+                Console.WriteLine($"bench {jet,-15} {c.name,-9} hold {hold.RateRms:F2} deg/s | pull q err {100 * pull.QErr:F0}% over {100 * pull.QOver:F0}% | half roll p err {100 * roll.PErr:F0}% beta {roll.BetaMax:F1} | full roll beta {full.BetaMax:F1} |q| {full.QAbsMax:F1} | chatter {chatter:F2}");
+                // pass marks: what the 25 Nov tuning shows, with room. Noise and delay are allowed more surface dither.
+                bool nominal = c.name == "model";
+                float chatterMax = c.noise > 0f ? 8f : c.delay > 0 ? 12f : 1.5f;
+                Check(hold.RateRms < (nominal ? 0.5f : 2f), $"bench {jet} {c.name}: hands-off holds the rates ({hold.RateRms:F2} deg/s rms)");
+                Check(pull.QErr < (nominal ? 0.06f : 0.12f), $"bench {jet} {c.name}: pitch rate follows the command ({100 * pull.QErr:F0}% off)");
+                Check(pull.QOver < 0.2f, $"bench {jet} {c.name}: no large pitch overshoot ({100 * pull.QOver:F0}%)");
+                Check(roll.PErr < (nominal ? 0.03f : 0.06f), $"bench {jet} {c.name}: half-stick roll rate follows the command ({100 * roll.PErr:F0}% off)");
+                Check(full.BetaMax < 9f && full.QAbsMax < 8f, $"bench {jet} {c.name}: a full-stick roll keeps sideslip and pitch in hand (beta {full.BetaMax:F1} deg, |q| {full.QAbsMax:F1} deg/s)");
+                Check(chatter < chatterMax, $"bench {jet} {c.name}: surfaces don't chatter ({chatter:F2} reversals per surface per second)");
+            }
+        }
+    }
+
+    private struct BenchResult
+    {
+        public float RateRms, QErr, QOver, PErr, BetaMax, QAbsMax, Chatter;
+    }
+
+    /// <summary>
+    /// Fly a bench airframe at 200 m/s for <paramref name="seconds"/> with the stick from <paramref name="stick"/>.
+    /// Errors are mean |actual − commanded| over the second half, relative to the command; overshoot past the settled command; chatter =
+    /// share of ticks a surface command reverses direction by more than 0.05 deg.
+    /// </summary>
+    private static BenchResult Fly(string path, float scale, int delay, float noise, float seconds, Func<float, (float p, float r, float y)> stick)
+    {
+        var b = new FbwBench(path) { EffectScale = scale, Delay = delay, Noise = noise };
+        b.Start(200f);
+        // the trim only balances lift and weight: let the FBW settle the start-up pitching moment hands-off first
+        for (int k = 0; k < 120; k++) b.Step(0f, 0f, 0f);
+        // FBW_TRACE=<file>: write this run's per-tick trace (debugging the bench)
+        string tracePath = Environment.GetEnvironmentVariable("FBW_TRACE");
+        System.IO.StreamWriter trace = tracePath != null && (Environment.GetEnvironmentVariable("FBW_TRACE_JET") ?? "") == b.Unit ? new System.IO.StreamWriter(tracePath, true) : null;
+        int n = (int)(seconds * 60f), half = n / 2, rev = 0, steps = 0;
+        double rate2 = 0, qe = 0, qc = 0, pe = 0, pc = 0;
+        float qMax = 0f, qAbs = 0f, betaMax = 0f;
+        float[] last = new float[b.Slots], lastD = new float[b.Slots];
+        for (int k = 0; k < n; k++)
+        {
+            var (sp, sr, sy) = stick(k / 60f);
+            b.Step(sp, sr, sy);
+            AutopilotMod.Fbw.Control.FlightState s = b.State();
+            float d = 57.29578f;
+            if (k >= 60) rate2 += (s.P * s.P + s.Q * s.Q + s.R * s.R) * d * d;
+            if (k >= half)
+            {
+                qe += Math.Abs(s.Q - b.Fc.Law.Q); qc += Math.Abs(b.Fc.Law.Q);
+                pe += Math.Abs(s.P - b.Fc.Law.P); pc += Math.Abs(b.Fc.Law.P);
+            }
+            qMax = Math.Max(qMax, s.Q);
+            qAbs = Math.Max(qAbs, Math.Abs(s.Q) * d);
+            betaMax = Math.Max(betaMax, Math.Abs(s.Beta) * d);
+            if (trace != null)
+            {
+                var ix = b.Fc.Indi;
+                trace.WriteLine(string.Join(",", new[] { k, s.P * d, s.Q * d, s.R * d, b.Fc.Law.P * d, b.Fc.Law.Q * d, b.Fc.Law.R * d, s.Beta * d, ix.NuRoll * d, ix.NuPitch * d, ix.NuYaw * d, ix.UnmetRoll * d, ix.UnmetPitch * d, ix.UnmetYaw * d, ix.Alloc.Iterations }
+                    .Select(v => Convert.ToSingle(v).ToString("G4", System.Globalization.CultureInfo.InvariantCulture))
+                    .Concat(Enumerable.Range(0, b.Slots).Select(j => b.Fc.Command[j].ToString("G4", System.Globalization.CultureInfo.InvariantCulture)))
+                    .Concat(Enumerable.Range(0, b.Slots).Select(j => $"|{b.Fc.Position[j]:F2} [{b.Fc.ReachLo[j]:F2},{b.Fc.ReachHi[j]:F2}] B({ix.Alloc.B[3 * j] * d:F1};{ix.Alloc.B[3 * j + 1] * d:F1};{ix.Alloc.B[3 * j + 2] * d:F1})"))));
+            }
+            for (int j = 0; j < b.Surfaces; j++)
+            {
+                // a reversal: a step of over 0.5 deg straight after one the other way (bang-bang trading, not drift)
+                float dj = b.Fc.Command[j] - last[j];
+                if (Math.Abs(dj) > 0.5f && Math.Abs(lastD[j]) > 0.5f && Math.Sign(dj) != Math.Sign(lastD[j])) rev++;
+                lastD[j] = dj;
+                last[j] = b.Fc.Command[j];
+                steps++;
+            }
+        }
+        trace?.Dispose();
+        float qSettled = b.Fc.Law.Q;
+        return new BenchResult
+        {
+            RateRms = (float)Math.Sqrt(rate2 / Math.Max(1, n - 60)),
+            QErr = qc > 1e-6 ? (float)(qe / qc) : 0f,
+            QOver = qSettled > 1e-3f ? Math.Max(0f, qMax / qSettled - 1f) : 0f,
+            PErr = pc > 1e-6 ? (float)(pe / pc) : 0f,
+            BetaMax = betaMax,
+            QAbsMax = qAbs,
+            Chatter = steps > 0 ? 60f * rev / steps : 0f, // reversals per surface per second, over 60
+        };
+    }
+
+    /// <summary>The FBW's allocator and channel mixing.</summary>
+    private static void CheckFbwControl()
+    {
+        // two effectors, roll-only and pitch-only, wide boxes: the exact increments
+        var a = new AutopilotMod.Fbw.Control.Allocator(4) { Count = 2 };
+        a.B[0] = 2f; a.B[4] = 4f; // effector 0: 2 roll per unit; effector 1: 4 pitch per unit
+        for (int j = 0; j < 2; j++) { a.Lo[j] = -10f; a.Hi[j] = 10f; a.C[j] = 1e-9f; }
+        a.Solve(1f, 2f, 0f);
+        Check(Near(a.Du[0], 0.5f) && Near(a.Du[1], 0.5f), $"allocator: exact increments ({a.Du[0]:F3}, {a.Du[1]:F3})");
+
+        // a redundant pair on the same axis, one boxed: the free one makes up the rest
+        a.Count = 2;
+        a.B[0] = 1f; a.B[1] = 0f; a.B[3] = 1f; a.B[4] = 0f;
+        a.Lo[0] = -0.2f; a.Hi[0] = 0.2f; a.Lo[1] = -10f; a.Hi[1] = 10f;
+        a.Solve(1f, 0f, 0f);
+        Check(Near(a.Du[0], 0.2f) && Near(a.Du[1], 0.8f, 1e-2f), $"allocator: a saturated effector's share moves to its partner ({a.Du[0]:F3}, {a.Du[1]:F3})");
+        a.Achieved(out float gr, out _, out _);
+        Check(Near(gr, 1f, 1e-2f), "allocator: the pair still delivers the request");
+
+        // equal partners, both free, with the pull to neutral: they share the work
+        a.Lo[0] = -10f; a.Hi[0] = 10f;
+        a.C[0] = a.C[1] = 1e-3f;
+        a.Solve(1f, 0f, 0f);
+        Check(Near(a.Du[0], a.Du[1], 1e-3f), "allocator: equal partners split evenly");
+
+        // surface channels: elevator pitch -35, roll +-10 at rest; a 5 deg target moves both channels 2.5 deg
+        float[] range = { -35f, 10f, 0f }, cur = { 0f, 0f, 0f }, inp = new float[3];
+        AutopilotMod.Fbw.Control.ChannelMix.Surface(5f, range, cur, inp);
+        Check(Near(inp[0] * range[0], 2.5f) && Near(inp[1] * range[1], 2.5f) && inp[2] == 0f, "channels: water-filling shares the target");
+        AutopilotMod.Fbw.Control.ChannelMix.Surface(30f, range, cur, inp);
+        Check(Near(inp[1], 1f) && Near(inp[0] * range[0], 20f), "channels: a full channel stops, the rest goes on");
+        AutopilotMod.Fbw.Control.ChannelMix.Surface(99f, range, cur, inp);
+        Check(Near(inp[0] * range[0] + inp[1] * range[1], 45f), "channels: target clamped to the total travel");
+        AutopilotMod.Fbw.Control.ChannelMix.Reach(range, new float[] { 0f, 9.5f, 0f }, 70f, 1f / 60f, out float lo, out float hi);
+        Check(Near(hi, 9.5f + 1.1667f + 0.5f, 1e-3f) && Near(lo, 9.5f - 2f * 1.1667f, 1e-3f), $"channels: one tick's reach ({lo:F3} .. {hi:F3})");
+
+        // nozzle inputs: the game maps angle = -clamp(input * gain, +-1) * vectoring
+        float pin = AutopilotMod.Fbw.Control.ChannelMix.NozzlePitchInput(10f, 15f, 2f);
+        Check(Near(-Math.Max(-1f, Math.Min(1f, pin * 2f)) * 15f, 10f), "nozzle: pitch input gives the angle");
+        float yin = AutopilotMod.Fbw.Control.ChannelMix.NozzleYawInput(-6f, 15f);
+        Check(Near(Math.Max(-1f, Math.Min(1f, -yin)) * 15f, -6f), "nozzle: yaw input gives the angle");
     }
 
     private static void CheckPlanner()

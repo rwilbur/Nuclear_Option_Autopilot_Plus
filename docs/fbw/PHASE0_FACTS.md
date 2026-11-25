@@ -126,9 +126,17 @@ uses them is ported.
 ### Other thrust and torque sources (found by the phase-2 force probe)
 
 - **`DuctedThrustSystem`** drives `JetNozzle`s from an engine's power: the **VT-7 Vagrant's** thrust comes
-  through it, and its `Turbofan` has no nozzles of its own.
-- **`ReactionControlSystem`** (+ `Thruster`): reaction-control jets, with force at each thruster from the
-  inputs. Seen on the Vagrant and the Compass.
+  through it, and its `Turbofan` has no nozzles of its own (its `thrustVectoring` reads 0). Its nozzles
+  **swivel, Harrier-style**:
+  - the angle (0 to `swivelLimit`, 120°) follows `customAxis1`, the custom-axis lever;
+  - each nozzle adds `yawSwivel` × yaw input for yaw;
+  - each slews at `swivelRate`.
+
+  This is VTOL vectoring, not pitch-control TVC.
+- **`ReactionControlSystem`** (+ `Thruster`): reaction-control jets, **on the Vagrant only** of the jets
+  logged (the Compass has none; an earlier note of it on the Compass was a misread log). Each thruster's force is thrustMin to thrustMax, set by
+  pitch·f.x + yaw·f.y + roll·f.z of the inputs, scaled by the turbofan's thrust ratio. **Only below
+  `maxSpeed` (100 m/s)**, for hover and slow flight.
 - **`MagicTorqueController`**: adds torque straight from the stick (pitch/yaw/roll × gain) to its acting
   parts, plus sideslip damping, with power draw. Which jets carry it is not known yet.
 

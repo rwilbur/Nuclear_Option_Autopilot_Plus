@@ -84,6 +84,18 @@ namespace AutopilotMod.Fbw
 
         public float Split => Job.splitAmount;
 
+        /// <summary>The job's three channel positions (deg), for a surface with no link (the exporter). False before the job exists.</summary>
+        public static bool Channels(ControlSurface cs, out float pitch, out float roll, out float yaw)
+        {
+            pitch = roll = yaw = 0f;
+            if (cs == null || !JobRef(cs).IsCreated) return false;
+            ref ControlSurfaceFields f = ref JobRef(cs).Ref();
+            pitch = f.currentPitch;
+            roll = f.currentRoll;
+            yaw = f.currentYaw;
+            return true;
+        }
+
         private static float Channel(float input, float range)
         {
             float r = System.Math.Abs(range);

@@ -152,6 +152,13 @@ namespace AutopilotMod.Fbw
             Pose(j, c.transform, root);
             j.Key("fields").Begin('[');
             foreach (string line in fields) j.Str(line);
+            // a surface's deflection at export time, so models can rotate its pose back to neutral
+            if (c is ControlSurface cs && SurfaceLink.Channels(cs, out float cp, out float cr, out float cy))
+            {
+                j.Str("job.currentPitch=" + F(cp));
+                j.Str("job.currentRoll=" + F(cr));
+                j.Str("job.currentYaw=" + F(cy));
+            }
             j.End(']');
             j.Key("transforms").Begin('{');
             foreach ((string name, Transform t) in poses)

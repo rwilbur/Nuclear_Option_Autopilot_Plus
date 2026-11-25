@@ -35,9 +35,8 @@ namespace AutopilotMod.Fbw.Model
             if (!(v2 > 0f)) return V3.Zero; // the game's force is non-finite here and it zeroes it
             if (p.Channeling > 0f) v = RotateTowards(v, p.ChannelForward, p.Channeling);
 
-            V3 vLocal = p.LiftRot.Inverse * v;
             V3 n = V3.Cross(v, p.LiftRot.Right).Normalized;
-            alpha = (float)Math.Atan2(vLocal.Y, vLocal.Z);
+            alpha = AoA(p.LiftRot, v);
             Coefficients(lift, drag, p.Foil, alpha, out float cl, out float cd);
 
             float parasite = (p.DragArea + p.Area * 0.1f) * (1f - p.Eff);
@@ -55,6 +54,21 @@ namespace AutopilotMod.Fbw.Model
             }
             V3 liftForce = -n * (cl * p.Rho * v2 * 0.5f * p.Area * p.Eff);
             return liftForce + dragForce;
+        }
+
+        /// <summary>The part's local angle of attack (rad, the game's sign: the chart index), as the force uses it.</summary>
+        public static float LocalAoA(in Input p)
+        {
+            V3 v = p.VAir;
+            if (!(v.SqrMagnitude > 0f)) return 0f;
+            if (p.Channeling > 0f) v = RotateTowards(v, p.ChannelForward, p.Channeling);
+            return AoA(p.LiftRot, v);
+        }
+
+        private static float AoA(Q4 liftRot, V3 v)
+        {
+            V3 local = liftRot.Inverse * v;
+            return (float)Math.Atan2(local.Y, local.Z);
         }
 
         /// <summary>The torque the game adds with the force: as if applied at the centre of lift (N m, world).</summary>

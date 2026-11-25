@@ -17,6 +17,10 @@
     <Compile Include="..\src\CoverageMath.cs" />
     <Compile Include="..\src\Fbw\AirData.cs" />
     <Compile Include="..\src\Fbw\Model\*.cs" />
+    <Compile Include="..\src\Fbw\Control\*.cs" />
+    <Compile Include="MiniJson.cs" />
+    <Compile Include="FbwBench.cs" />
+    <None Include="airframes\*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="airframes" />
   </ItemGroup>
 
 </Project>
