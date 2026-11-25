@@ -36,6 +36,10 @@ internal sealed class FbwBench
         public readonly float[] Range = new float[3], Cur = new float[3], In = new float[3];
         public float Servo;
         public float Angle => Cur[0] + Cur[1] + Cur[2];
+        public bool PitchRole => Range[0] != 0f; // stock pitches with it (FbwFlight: no pitch use otherwise)
+        // split (drag) surface: force = -split x SplitDrag x rho |v| v on the part
+        public float MaxSplit, SplitDrag, YawSplitFactor, Split;
+        public bool Splits => MaxSplit > 0f && SplitDrag > 0f && YawSplitFactor != 0f && Range[2] == 0f;
     }
 
     private sealed class Nozzle
@@ -47,6 +51,7 @@ internal sealed class FbwBench
     public readonly string Unit;
     private readonly List<Part> parts = new List<Part>();
     private readonly List<Surface> surfaces = new List<Surface>();
+    private readonly List<Surface> splits = new List<Surface>(); // slots after the surfaces, before the nozzles
     private readonly List<Nozzle> nozzles = new List<Nozzle>();
     private readonly MassProps mass = new MassProps(); // body frame, about the CG
     private readonly float[] lift, drag;
@@ -120,7 +125,11 @@ internal sealed class FbwBench
             string att = Fields(s).First(x => x.StartsWith("attachedSurface->")).Split(new[] { ':' }, 2)[1];
             if (!byPath.TryGetValue(att, out Part p)) continue;
             var t = (Dictionary<string, object>)s["transforms"];
-            var sf = new Surface { Name = ((string)s["path"]).Split('/').Last(), Part = p, Servo = F(s, "servoSpeed") };
+            var sf = new Surface
+            {
+                Name = ((string)s["path"]).Split('/').Last(), Part = p, Servo = F(s, "servoSpeed"),
+                MaxSplit = F(s, "maxSplit"), SplitDrag = F(s, "splitDrag"), YawSplitFactor = F(s, "yawSplitFactor"),
+            };
             sf.Range[0] = F(s, "pitchRange"); sf.Range[1] = F(s, "rollRange"); sf.Range[2] = F(s, "yawRange");
             if (sf.Range.All(r => r == 0f)) continue; // split-only (wingtip brakes)
             // the hinge is the visible mesh's x axis; older exports lack it: the lift normal's x is the same axis
@@ -135,6 +144,7 @@ internal sealed class FbwBench
             }
             p.Surface = sf;
             surfaces.Add(sf);
+            if (sf.Splits) splits.Add(sf);
         }
 
         // left/right mirror mismatch of the lift frames (deg): how far the export's "neutral" is from neutral
@@ -177,7 +187,8 @@ internal sealed class FbwBench
 
     public int Surfaces => surfaces.Count;
     public int Nozzles => nozzles.Count;
-    public int Slots => surfaces.Count + 2 * nozzles.Count;
+    private int NozzleBase => surfaces.Count + splits.Count;
+    public int Slots => NozzleBase + 2 * nozzles.Count;
 
     /// <summary>Level flight at <paramref name="speed"/>, wings level, at the AoA whose lift carries the weight, surfaces neutral.</summary>
     public void Start(float speed)
@@ -204,7 +215,7 @@ internal sealed class FbwBench
         rot = Q4.AngleAxis(-alpha * 57.29578f, new V3(1f, 0f, 0f)); // nose up by alpha
         vel = new V3(0f, 0f, speed);
         omega = V3.Zero;
-        foreach (Surface s in surfaces) Array.Clear(s.Cur, 0, 3);
+        foreach (Surface s in surfaces) { Array.Clear(s.Cur, 0, 3); s.Split = 0f; }
         foreach (Nozzle n in nozzles) n.Ax = n.Ay = n.CmdX = n.CmdY = 0f;
     }
 
@@ -249,12 +260,24 @@ internal sealed class FbwBench
             Effectiveness.AttachedRange(input, sf.Hinge, sf.Angle, peaks, 1f, out float aLo, out float aHi);
             Fc.SetBox(j, rLo, rHi, aLo, aHi);
             V3 m = Effectiveness.Surface(input, sf.Hinge, sf.Part.Com - cg, lift, drag);
-            Fc.SetEffect(j, Body(MassProps.Solve(mass.Inertia, m)));
+            V3 acc = Body(MassProps.Solve(mass.Inertia, m));
+            Fc.SetEffect(j, sf.PitchRole ? acc : new V3(acc.X, 0f, acc.Z));
+        }
+        for (int k = 0; k < splits.Count; k++)
+        {
+            Surface sf = splits[k];
+            int j = surfaces.Count + k;
+            V3 v = vb + V3.Cross(omega, sf.Part.Com - cg);
+            Fc.Position[j] = sf.Split;
+            float step = sf.Servo * Dt * FlightComputer.ReachTicks;
+            Fc.SetBox(j, Math.Max(0f, sf.Split - step), Math.Min(sf.MaxSplit, sf.Split + step), 0f, sf.MaxSplit);
+            Fc.SetEffect(j, Body(MassProps.Solve(mass.Inertia, Effectiveness.Split(v, Rho, sf.SplitDrag, sf.Part.Com - cg))));
+            Fc.CostScale[j] = 3f;
         }
         for (int k = 0; k < nozzles.Count; k++)
         {
             Nozzle n = nozzles[k];
-            int jx = surfaces.Count + 2 * k, jy = jx + 1;
+            int jx = NozzleBase + 2 * k, jy = jx + 1;
             bool on = s.Speed <= n.MaxV;
             V3 fwd = NozzleForward(n, n.Ax, n.Ay), arm = n.Pos - cg;
             float step = 70f * Dt * FlightComputer.ReachTicks;
@@ -292,12 +315,20 @@ internal sealed class FbwBench
                 sf.Cur[c] = Clamp(sf.Cur[c], -Math.Abs(r), Math.Abs(r));
             }
         }
+        for (int k = 0; k < splits.Count; k++)
+        {
+            Surface sf = splits[k];
+            // through the game's split mapping (split = YawSplitFactor x yaw x MaxSplit, clamped) and servo
+            float yaw = Clamp(cmd[surfaces.Count + k] / (sf.YawSplitFactor * sf.MaxSplit), -1f, 1f);
+            float target = Clamp(sf.YawSplitFactor * yaw * sf.MaxSplit, 0f, sf.MaxSplit);
+            sf.Split += Clamp(target - sf.Split, -sf.Servo * Dt, sf.Servo * Dt);
+        }
         for (int k = 0; k < nozzles.Count; k++)
         {
             Nozzle n = nozzles[k];
             // through the game's input mapping and slew (Turbojet.FixedUpdate)
-            float px = -Clamp(ChannelMix.NozzlePitchInput(cmd[surfaces.Count + 2 * k], n.VecX, 2f) * 2f, -1f, 1f) * n.VecX;
-            float py = Clamp(-ChannelMix.NozzleYawInput(cmd[surfaces.Count + 2 * k + 1], n.VecY), -1f, 1f) * n.VecY;
+            float px = -Clamp(ChannelMix.NozzlePitchInput(cmd[NozzleBase + 2 * k], n.VecX, 2f) * 2f, -1f, 1f) * n.VecX;
+            float py = Clamp(-ChannelMix.NozzleYawInput(cmd[NozzleBase + 2 * k + 1], n.VecY), -1f, 1f) * n.VecY;
             n.Ax += Clamp(px - n.Ax, -70f * Dt, 70f * Dt);
             n.Ay += Clamp(py - n.Ay, -70f * Dt, 70f * Dt);
             if (vel.Magnitude > n.MaxV) n.Ax = n.Ay = 0f;
@@ -335,6 +366,13 @@ internal sealed class FbwBench
             if (p.Col.SqrMagnitude > 0f) m += Plate.Torque(input, f);
             force += f;
             moment += m;
+        }
+        foreach (Surface sf in splits)
+        {
+            V3 v = vb + V3.Cross(omega, sf.Part.Com - cg);
+            V3 f = v * (-sf.Split * EffectScale * sf.SplitDrag * Rho * v.Magnitude);
+            force += f;
+            moment += V3.Cross(sf.Part.Com - cg, f);
         }
         foreach (Nozzle n in nozzles)
         {

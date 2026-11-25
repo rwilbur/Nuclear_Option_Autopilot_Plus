@@ -187,7 +187,7 @@ namespace AutopilotMod.Fbw
         private void RateLawLog()
         {
             var law = flight.Computer.Law;
-            log.LogInfo($"FBW flying {link.Aircraft.definition.unitName}: {flight.Surfaces} surfaces, {flight.Nozzles} vectoring engines; " +
+            log.LogInfo($"FBW flying {link.Aircraft.definition.unitName}: {flight.Surfaces} surfaces, {flight.Splits} splits, {flight.Nozzles} vectoring engines; " +
                         $"roll {law.PMax * AirData.Rad2Deg:F0} deg/s, pitch {law.QMax * AirData.Rad2Deg:F0} deg/s, {law.NzMax:F1} g");
         }
 

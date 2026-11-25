@@ -22,6 +22,14 @@ namespace AutopilotMod.Fbw
             AccessTools.FieldRefAccess<ControlSurface, GameObject>("visibleMesh");
         private static readonly AccessTools.FieldRef<ControlSurface, bool> LockedRef =
             AccessTools.FieldRefAccess<ControlSurface, bool>("locked");
+        // the surface's own settings (its job copies them when it is created): readable with or without a job
+        private static readonly AccessTools.FieldRef<ControlSurface, float> PitchRangeRef = AccessTools.FieldRefAccess<ControlSurface, float>("pitchRange");
+        private static readonly AccessTools.FieldRef<ControlSurface, float> RollRangeRef = AccessTools.FieldRefAccess<ControlSurface, float>("rollRange");
+        private static readonly AccessTools.FieldRef<ControlSurface, float> YawRangeRef = AccessTools.FieldRefAccess<ControlSurface, float>("yawRange");
+        private static readonly AccessTools.FieldRef<ControlSurface, bool> FlapRef = AccessTools.FieldRefAccess<ControlSurface, bool>("flap");
+        private static readonly AccessTools.FieldRef<ControlSurface, float> MaxSplitRef = AccessTools.FieldRefAccess<ControlSurface, float>("maxSplit");
+        private static readonly AccessTools.FieldRef<ControlSurface, float> SplitDragRef = AccessTools.FieldRefAccess<ControlSurface, float>("splitDrag");
+        private static readonly AccessTools.FieldRef<ControlSurface, float> YawSplitRef = AccessTools.FieldRefAccess<ControlSurface, float>("yawSplitFactor");
 
         public readonly ControlSurface Surface;
         public readonly string Name;
@@ -41,7 +49,23 @@ namespace AutopilotMod.Fbw
             Part = AttachedRef(surface) as AeroPart;
             GameObject mesh = MeshRef(surface);
             Hinge = mesh != null ? mesh.transform : null;
+            StockPitch = PitchRangeRef(surface);
+            StockRoll = RollRangeRef(surface);
+            StockYaw = YawRangeRef(surface);
+            IsFlap = FlapRef(surface);
+            StockMaxSplit = MaxSplitRef(surface);
+            StockSplitDrag = SplitDragRef(surface);
+            StockYawSplit = YawSplitRef(surface);
         }
+
+        /// <summary>The surface's built-in channel ranges (deg): what the stock mixing uses it for.</summary>
+        public readonly float StockPitch, StockRoll, StockYaw;
+
+        /// <summary>A flap: driven by the gear, not the inputs.</summary>
+        public readonly bool IsFlap;
+
+        /// <summary>Its split, if any: max (deg), drag per degree, and how it opens with the yaw input.</summary>
+        public readonly float StockMaxSplit, StockSplitDrag, StockYawSplit;
 
         /// <summary>The aero part whose plate this surface turns.</summary>
         public readonly AeroPart Part;
@@ -104,6 +128,12 @@ namespace AutopilotMod.Fbw
         public float Split => Job.splitAmount;
 
         public float MaxSplit => Job.maxSplit;
+
+        /// <summary>Split drag per degree: force = −split × SplitDrag × ρ v² along the flow (ControlSurface.Aero).</summary>
+        public float SplitDrag => Job.splitDrag;
+
+        /// <summary>The split opens by YawSplitFactor × yaw input × MaxSplit (and fully at idle throttle).</summary>
+        public float YawSplitFactor => Job.yawSplitFactor;
 
         /// <summary>A flap: driven by the gear, not the inputs.</summary>
         public bool Flap => Job.flap;

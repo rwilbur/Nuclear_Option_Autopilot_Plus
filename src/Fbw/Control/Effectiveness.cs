@@ -73,6 +73,13 @@ namespace AutopilotMod.Fbw.Control
             V3.Cross(arm, V3.Cross(axis, forward) * (thrust * Deg2Rad));
 
         /// <summary>
+        /// Moment about the CG per degree of split (N m / deg, world). A split surface's drag is
+        /// −split × splitDrag × ρ |v|² v̂ on its part (ControlSurface.Aero): linear in the split, so its effect is exact.
+        /// </summary>
+        public static V3 Split(V3 vAir, float rho, float splitDrag, V3 arm) =>
+            V3.Cross(arm, vAir * (-splitDrag * rho * vAir.Magnitude));
+
+        /// <summary>
         /// The deflections (deg, absolute) that keep the surface on the attached side of its lift curve: its local AoA
         /// within <paramref name="margin"/> of the airfoil's stall peaks. Past a peak the lift slope turns over, the
         /// linear allocation stops holding, and the surface would be driven in and out of stall every tick. A

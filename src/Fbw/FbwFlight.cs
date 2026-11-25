@@ -27,9 +27,11 @@ namespace AutopilotMod.Fbw
         private const float NozzleSlew = 70f; // deg/s, Turbojet/Turbofan.FixedUpdate
 
         private readonly AircraftLink link;
-        private readonly List<SurfaceLink> surfaces = new List<SurfaceLink>(); // effector slots 0..n-1
-        private readonly List<SurfaceLink> passive = new List<SurfaceLink>();  // flaps and split-only: stock behaviour
-        private readonly List<EngineLink> vectoring = new List<EngineLink>();  // two slots each
+        private readonly List<SurfaceLink> surfaces = new List<SurfaceLink>(); // deflection slots [0, S)
+        private readonly List<bool> pitchRole = new List<bool>();              // per deflection slot: stock uses it for pitch
+        private readonly List<SurfaceLink> splits = new List<SurfaceLink>();   // split (drag) slots [S, S + P)
+        private readonly List<SurfaceLink> passive = new List<SurfaceLink>();  // flaps and the like: stock behaviour
+        private readonly List<EngineLink> vectoring = new List<EngineLink>();  // two slots each, from NozzleBase
         private readonly float[] range = new float[3], current = new float[3], inputs = new float[3];
 
         public readonly FlightComputer Computer;
@@ -37,24 +39,31 @@ namespace AutopilotMod.Fbw
         public FbwFlight(AircraftLink link, ControlsFilter.FlyByWire stock)
         {
             this.link = link;
+            // Sorted from each surface's own settings, so every surface gets its slot for the whole flight; each tick a slot
+            // whose surface can't act right now (shot off, locked, no flow) sits that tick out and comes back when it can.
             foreach (SurfaceLink s in link.Surfaces)
             {
-                if (!s.JobReady) continue;
-                s.ReadChannels(range, current);
-                bool travel = range[0] != 0f || range[1] != 0f || range[2] != 0f;
-                if (s.Flap || !travel || s.Part == null || s.Hinge == null) passive.Add(s);
-                else surfaces.Add(s);
+                bool travel = s.StockPitch != 0f || s.StockRoll != 0f || s.StockYaw != 0f;
+                if (s.IsFlap || !travel || s.Part == null || s.Hinge == null) passive.Add(s);
+                else
+                {
+                    surfaces.Add(s);
+                    pitchRole.Add(s.StockPitch != 0f);
+                }
+                // a split that opens with the yaw input, on a surface whose yaw channel moves nothing: a drag-yaw effector
+                if (s.Part != null && s.StockMaxSplit > 0f && s.StockYawSplit != 0f && s.StockSplitDrag > 0f && s.StockYaw == 0f) splits.Add(s);
             }
             foreach (EngineLink e in link.Engines)
             {
                 Vector3 v = e.Vectoring;
                 if ((v.x > 0f || v.y > 0f) && e.VectoringTransform != null) vectoring.Add(e);
             }
-            Computer = new FlightComputer(surfaces.Count + 2 * vectoring.Count);
+            Computer = new FlightComputer(NozzleBase + 2 * vectoring.Count);
+            for (int k = 0; k < splits.Count; k++) Computer.CostScale[surfaces.Count + k] = 3f; // drag costs speed: closed when not needed
             for (int k = 0; k < vectoring.Count; k++)
             {
-                Computer.CostScale[surfaces.Count + 2 * k] = 10f; // nozzles back to centre with spare freedom: thrust goes forward
-                Computer.CostScale[surfaces.Count + 2 * k + 1] = 10f;
+                Computer.CostScale[NozzleBase + 2 * k] = 10f; // nozzles back to centre with spare freedom: thrust goes forward
+                Computer.CostScale[NozzleBase + 2 * k + 1] = 10f;
             }
             if (stock != null)
             {
@@ -65,7 +74,9 @@ namespace AutopilotMod.Fbw
         }
 
         public int Surfaces => surfaces.Count;
+        public int Splits => splits.Count;
         public int Nozzles => vectoring.Count;
+        private int NozzleBase => surfaces.Count + splits.Count;
 
         public void Engage(in AirframeState s) => Computer.Engage(State(s));
 
@@ -105,17 +116,44 @@ namespace AutopilotMod.Fbw
                 }
                 V3 hinge = GameAero.V(s.Hinge.right);
                 V3 m = Effectiveness.Surface(input, hinge, GameAero.V(s.Part.rb.worldCenterOfMass) - cg, aero.Lift, aero.Drag);
-                fc.SetEffect(j, FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, m)));
+                V3 acc = FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, m));
+                // A surface the stock mixing never pitches with (ailerons, wing flaps) is not used for pitch: otherwise the
+                // allocator parks the wing's roll surfaces deflected together for pitch trim, and rolls start slowly (Ifrit
+                // log, 25 Nov). Its real pitch side effect still shows in the measured acceleration, which INDI takes out.
+                if (!pitchRole[j]) acc = new V3(acc.X, 0f, acc.Z);
+                fc.SetEffect(j, acc);
                 fc.Position[j] = angle;
                 ChannelMix.Reach(range, current, s.Servo, dt * FlightComputer.ReachTicks, out float rLo, out float rHi);
                 Effectiveness.AttachedRange(input, hinge, angle, aero.Peaks, 1f, out float aLo, out float aHi);
                 fc.SetBox(j, rLo, rHi, aLo, aHi);
             }
 
+            // split surfaces: drag on one side, yaw. At idle throttle the game opens them all (the airbrake): left to stock then.
+            ControlInputs pilot = link.Shared;
+            bool idle = pilot.throttle == 0f;
+            Vector3 wind = link.Aircraft.GetWindVelocity();
+            for (int k = 0; k < splits.Count; k++)
+            {
+                SurfaceLink s = splits[k];
+                int j = surfaces.Count + k;
+                float now = s.JobReady ? s.Split : 0f;
+                if (idle || !s.JobReady || s.Locked || s.Part.rb == null)
+                {
+                    fc.Disable(j, now);
+                    continue;
+                }
+                V3 v = GameAero.V(s.Part.rb.velocity - wind);
+                V3 m = Effectiveness.Split(v, link.Aircraft.airDensity, s.SplitDrag, GameAero.V(s.Part.rb.worldCenterOfMass) - cg);
+                fc.SetEffect(j, FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, m)));
+                fc.Position[j] = now;
+                float step = s.Servo * dt * FlightComputer.ReachTicks, max = s.MaxSplit;
+                fc.SetBox(j, Math.Max(0f, now - step), Math.Min(max, now + step), 0f, max);
+            }
+
             for (int k = 0; k < vectoring.Count; k++)
             {
                 EngineLink e = vectoring[k];
-                int jx = surfaces.Count + 2 * k, jy = jx + 1;
+                int jx = NozzleBase + 2 * k, jy = jx + 1;
                 Vector3 now = e.Alive ? e.Nozzle : Vector3.zero;
                 bool on = e.Alive && state.Speed <= e.VectoringMaxAirspeed;
                 V3 mx = V3.Zero, my = V3.Zero;
@@ -137,9 +175,8 @@ namespace AutopilotMod.Fbw
                 Nozzle(fc, jy, vt != null && vec.y > 0f && my.SqrMagnitude > 0f && link.Aircraft.radarAlt >= 3f, now.y, vec.y, step, my, mass, rot);
             }
 
-            ControlInputs pilot = link.Shared;
             fc.Step(pilot.pitch, pilot.roll, pilot.yaw, State(state), dt);
-            Write(pilot);
+            Write(pilot, idle);
         }
 
         private static void Nozzle(FlightComputer fc, int j, bool on, float now, float limit, float step, V3 moment, MassProps mass, Q4 rot)
@@ -155,7 +192,7 @@ namespace AutopilotMod.Fbw
         }
 
         /// <summary>The commands as each surface's and engine's own inputs; the rest of the shared inputs passes through.</summary>
-        private void Write(ControlInputs pilot)
+        private void Write(ControlInputs pilot, bool idle)
         {
             float[] cmd = Computer.Command;
             for (int j = 0; j < surfaces.Count; j++)
@@ -168,10 +205,16 @@ namespace AutopilotMod.Fbw
                 ChannelMix.Surface(cmd[j], range, current, inputs);
                 i.pitch = inputs[0];
                 i.roll = inputs[1];
-                // a split surface opens with the yaw input (and at idle): with no yaw travel to use, the pedal keeps it stock
-                i.yaw = range[2] == 0f && s.MaxSplit > 0f ? pilot.yaw : inputs[2];
+                i.yaw = inputs[2];
             }
             foreach (SurfaceLink s in passive) Copy(pilot, s.Inputs);
+            // splits: the yaw input sets them (split = YawSplitFactor x yaw x MaxSplit); at idle, the pilot's pedal and the airbrake as stock
+            for (int k = 0; k < splits.Count; k++)
+            {
+                SurfaceLink s = splits[k];
+                float span = s.YawSplitFactor * s.MaxSplit;
+                s.Inputs.yaw = idle || span == 0f ? pilot.yaw : Math.Max(-1f, Math.Min(1f, cmd[surfaces.Count + k] / span));
+            }
 
             foreach (EngineLink e in link.Engines)
             {
@@ -182,7 +225,7 @@ namespace AutopilotMod.Fbw
             {
                 EngineLink e = vectoring[k];
                 Vector3 vec = e.Vectoring, gain = e.Gain;
-                int jx = surfaces.Count + 2 * k;
+                int jx = NozzleBase + 2 * k;
                 e.Inputs.pitch = ChannelMix.NozzlePitchInput(cmd[jx], vec.x, gain.x);
                 e.Inputs.yaw = ChannelMix.NozzleYawInput(cmd[jx + 1], vec.y);
             }
