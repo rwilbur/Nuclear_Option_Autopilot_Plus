@@ -1,6 +1,7 @@
 ﻿using System;
 using AutopilotMod.Fbw;
 using AutopilotMod.Fbw.Control;
+using BepInEx.Configuration;
 using UnityEngine;
 
 namespace AutopilotMod
@@ -13,7 +14,10 @@ namespace AutopilotMod
     ///   g limit; faint, the peak-lift boundary the limit override reaches. The dot is the jet now, with a 3 s trail.
     /// - LIFT: load factor against AoA at the current airspeed, the AoA limits and the governor's 0.5 s AoA forecast.
     /// Below: AoA and g against their limits, sideslip against its allowance, corner speed, the turn rate the envelope gives now and the
-    /// steady roll rate the yaw can coordinate. Header buttons set the limit override (AoA free or to the lift peak, its g) and the roll's sideslip allowance.
+    /// steady roll rate the yaw can coordinate.
+    /// - SET: every [FlyByWire] setting (mode, the limit override's key, AoA and g, the roll's sideslip allowance, telemetry, airframe
+    ///   export). Tap a row to step it; amber = changed from its default. Saved to the .cfg at once.
+    /// Shown whenever you fly an aircraft, so the mode can be switched on from here; the plots need the fly-by-wire flying.
     /// </summary>
     internal sealed class EnvelopePage : MfdFrame
     {
@@ -21,7 +25,8 @@ namespace AutopilotMod
         private const int Trail = 30;          // points, every TrailStep s
         private const float TrailStep = 0.1f;
 
-        private bool liftView;
+        private int view;           // 0 V-N, 1 LIFT, 2 SET
+        private int touched = -1;   // the settings row tapped last: its hint shows
         private readonly Vector2[] trail = new Vector2[Trail]; // (airspeed m/s, nz)
         private readonly Vector2[] trailAoa = new Vector2[Trail]; // (AoA deg, nz)
         private int trailCount, trailAt;
@@ -41,25 +46,140 @@ namespace AutopilotMod
 
         private static FbwFlight Flight => FbwController.Current?.Flight;
 
-        public bool Visible => Flight != null;
+        /// <summary>In an aircraft: the settings must be reachable to switch the fly-by-wire on.</summary>
+        public bool Visible => GameManager.GetLocalAircraft(out Aircraft ac) && ac != null;
 
-        // header touch buttons: 0-1 the views, 2-4 the override's AoA mode and g, and the roll's sideslip allowance
-        private Rect TabRect(int i) => i < 2 ? Sc(0.02f + 0.14f * i, 0.015f, 0.13f, 0.075f) : Sc(0.31f + 0.23f * (i - 2), 0.015f, 0.22f, 0.075f);
+        // header tabs: V-N, LIFT, SET
+        private static readonly string[] TabNames = { "V-N", "LIFT", "SET" };
+        private Rect TabRect(int i) => Sc(0.02f + 0.14f * i, 0.015f, 0.13f, 0.075f);
+
+        // ---- the settings ----
+        private const int Rows = 7;
+        private Rect RowRect(int i) => Sc(0.03f, 0.11f + 0.088f * i, 0.94f, 0.078f);
+
+        // the limit override's key: these, in turn (a key set in the .cfg shows by name until stepped past)
+        private static readonly KeyCode[] Keys = { KeyCode.Mouse1, KeyCode.Mouse2, KeyCode.Mouse3, KeyCode.Mouse4, KeyCode.None };
+
+        private void Step(int row)
+        {
+            switch (row)
+            {
+                case 0: cfg.FbwMode.Value = (FbwMode)(((int)cfg.FbwMode.Value + 1) % 4); break; // Off, Passthrough, Full, Multiplayer
+                case 1:
+                    int k = Array.IndexOf(Keys, cfg.KeyLimitOverride.Value.MainKey);
+                    KeyCode next = Keys[(k + 1) % Keys.Length]; // not in the list (-1): the first
+                    cfg.KeyLimitOverride.Value = next == KeyCode.None ? KeyboardShortcut.Empty : new KeyboardShortcut(next);
+                    break;
+                case 2: cfg.OverrideAoa.Value = cfg.OverrideAoa.Value == OverrideAoa.NoLimit ? OverrideAoa.LiftPeak : OverrideAoa.NoLimit; break;
+                case 3: cfg.OverrideG.Value = Next(GSteps, cfg.OverrideG.Value); break;
+                case 4: cfg.RollSideslip.Value = Next(SlipSteps, cfg.RollSideslip.Value); break;
+                case 5: cfg.FbwTelemetry.Value = !cfg.FbwTelemetry.Value; break;
+                default: cfg.ExportAirframes.Value = !cfg.ExportAirframes.Value; break;
+            }
+        }
+
+        private static string KeyName(KeyboardShortcut k) => k.MainKey switch
+        {
+            KeyCode.None => "OFF",
+            KeyCode.Mouse1 => "RIGHT MOUSE",
+            KeyCode.Mouse2 => "MIDDLE MOUSE",
+            KeyCode.Mouse3 => "MOUSE 4",
+            KeyCode.Mouse4 => "MOUSE 5",
+            _ => k.ToString().ToUpperInvariant(),
+        };
+
+        // label, value, changed from its default, and the hint shown once the row is tapped
+        private void Row(int row, out string label, out string value, out bool changed, out string hint)
+        {
+            switch (row)
+            {
+                case 0:
+                    label = "MODE";
+                    value = cfg.FbwMode.Value switch { FbwMode.Off => "OFF", FbwMode.Passthrough => "PASSTHROUGH", FbwMode.Full => "FULL", _ => "MULTIPLAYER" };
+                    changed = cfg.FbwMode.Value != (FbwMode)cfg.FbwMode.DefaultValue;
+                    hint = cfg.FbwMode.Value switch
+                    {
+                        FbwMode.Off => "THE GAME'S OWN FLY-BY-WIRE",
+                        FbwMode.Passthrough => "TEST OF THE TAKEOVER\nFLIES EXACTLY AS STOCK",
+                        FbwMode.Full => "EVERY SURFACE MOVED ON ITS OWN\nOTHER PLAYERS SEE AN APPROXIMATION",
+                        _ => "STOCK MIXING OF THE SHARED INPUTS\nOTHER PLAYERS SEE EXACTLY WHAT YOU FLY",
+                    };
+                    break;
+                case 1:
+                    label = "OVERRIDE KEY";
+                    value = KeyName(cfg.KeyLimitOverride.Value);
+                    changed = !cfg.KeyLimitOverride.Value.Equals((KeyboardShortcut)cfg.KeyLimitOverride.DefaultValue);
+                    hint = "HOLD TO LIFT THE AOA LIMIT\nG IS STILL HELD";
+                    break;
+                case 2:
+                    label = "OVERRIDE AOA";
+                    value = cfg.OverrideAoa.Value == OverrideAoa.LiftPeak ? "LIFT PEAK" : "FREE";
+                    changed = cfg.OverrideAoa.Value != (OverrideAoa)cfg.OverrideAoa.DefaultValue;
+                    hint = cfg.OverrideAoa.Value == OverrideAoa.LiftPeak ? "UP TO THE MOST LIFT, NO FURTHER" : "NO AOA LIMIT, AS ASSIST OFF\nA HELD PULL CAN FLIP THE JET";
+                    break;
+                case 3:
+                    label = "OVERRIDE G";
+                    value = $"x{cfg.OverrideG.Value:0.##}";
+                    changed = Math.Abs(cfg.OverrideG.Value - (float)cfg.OverrideG.DefaultValue) > 0.001f;
+                    hint = "THE G LIMIT WHILE THE KEY IS HELD\nAT MOST 19 G; BLACKOUT ABOVE 9";
+                    break;
+                case 4:
+                    label = "ROLL SLIP";
+                    value = $"{cfg.RollSideslip.Value:0} DEG";
+                    changed = Math.Abs(cfg.RollSideslip.Value - (float)cfg.RollSideslip.DefaultValue) > 0.001f;
+                    hint = "SIDESLIP A ROLL MAY BUILD BEFORE\nIT IS HELD TO WHAT THE YAW COORDINATES";
+                    break;
+                case 5:
+                    label = "TELEMETRY";
+                    value = cfg.FbwTelemetry.Value ? "ON" : "OFF";
+                    changed = cfg.FbwTelemetry.Value != (bool)cfg.FbwTelemetry.DefaultValue;
+                    hint = "LOGS EVERY TICK TO\nBEPINEX\\FBWLOGS";
+                    break;
+                default:
+                    label = "AIRFRAME EXPORT";
+                    value = cfg.ExportAirframes.Value ? "ON" : "OFF";
+                    changed = cfg.ExportAirframes.Value != (bool)cfg.ExportAirframes.DefaultValue;
+                    hint = "WRITES THIS JET ONCE TO\nBEPINEX\\FBWAIRFRAMES";
+                    break;
+            }
+        }
 
         protected override bool ScreenMouse(Event e)
         {
             if (e.type != EventType.MouseDown || e.button != 0) return false;
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < TabNames.Length; i++)
             {
                 if (!TabRect(i).Contains(e.mousePosition)) continue;
-                if (i < 2) liftView = i == 1;
-                else if (i == 2) cfg.OverrideAoa.Value = cfg.OverrideAoa.Value == OverrideAoa.NoLimit ? OverrideAoa.LiftPeak : OverrideAoa.NoLimit;
-                else if (i == 3) cfg.OverrideG.Value = Next(GSteps, cfg.OverrideG.Value);
-                else cfg.RollSideslip.Value = Next(SlipSteps, cfg.RollSideslip.Value);
+                view = i;
+                e.Use();
+                return true;
+            }
+            if (view != 2) return false;
+            for (int i = 0; i < Rows; i++)
+            {
+                if (!RowRect(i).Contains(e.mousePosition)) continue;
+                Step(i);
+                touched = i;
                 e.Use();
                 return true;
             }
             return false;
+        }
+
+        private void DrawSettings()
+        {
+            for (int i = 0; i < Rows; i++)
+            {
+                Row(i, out string label, out string value, out bool changed, out _);
+                Rect r = RowRect(i);
+                Border(r, i == touched ? Green : GreenFaint, Mathf.Max(1f, 0.004f * S), 0.01f * S);
+                Text(new Rect(r.x + 0.02f * S, r.y, r.width * 0.5f, r.height), label, 0.032f, GreenDim, TextAnchor.MiddleLeft, false);
+                Text(new Rect(r.x + r.width * 0.45f, r.y, r.width * 0.53f, r.height), value, 0.036f, changed ? Amber : Green, TextAnchor.MiddleRight);
+            }
+            string hint = "TAP A ROW TO CHANGE IT";
+            if (touched >= 0) Row(touched, out _, out _, out _, out hint);
+            Text(Sc(0.03f, 0.735f + 0.02f, 0.94f, 0.2f), hint, 0.03f, GreenDim, TextAnchor.UpperCenter, false);
+            Text(Sc(0.03f, 0.93f, 0.94f, 0.05f), "AMBER = CHANGED FROM DEFAULT", 0.026f, GreenFaint, TextAnchor.MiddleCenter, false);
         }
 
         // the step after the one at or above v, round to the first
@@ -72,12 +192,28 @@ namespace AutopilotMod
 
         protected override void DrawScreen()
         {
+            for (int i = 0; i < TabNames.Length; i++)
+            {
+                Rect r = TabRect(i);
+                bool on = view == i;
+                if (on) Fill(r, Green, 0.01f * S);
+                else Border(r, GreenDim, Mathf.Max(1f, 0.004f * S), 0.01f * S);
+                Text(r, TabNames[i], 0.03f, on ? Black : GreenDim, TextAnchor.MiddleCenter, false);
+            }
+            if (view == 2)
+            {
+                DrawSettings();
+                return;
+            }
             FbwFlight f = Flight;
             if (f == null || !f.Curve.Known) // the web mirror renders it out of the jet too
             {
-                Text(Sc(0.05f, 0.4f, 0.9f, 0.2f), f == null ? "FBW NOT FLYING" : "ENVELOPE...", 0.06f, GreenDim, TextAnchor.MiddleCenter, false);
+                string why = f != null ? "ENVELOPE..." : cfg.FbwMode.Value == FbwMode.Off || cfg.FbwMode.Value == FbwMode.Passthrough
+                    ? "FBW OFF\nTURN IT ON IN SET" : "FBW STANDBY\nFLIES ABOVE 60 M/S AND 5 M";
+                Text(Sc(0.05f, 0.35f, 0.9f, 0.3f), why, 0.05f, GreenDim, TextAnchor.MiddleCenter, false);
                 return;
             }
+            bool liftView = view == 1;
             FlightComputer fc = f.Computer;
             LiftCurve c = f.Curve;
             Fbw.Control.FlightState s = fc.Last;
@@ -101,20 +237,7 @@ namespace AutopilotMod
                 trailCount = Math.Min(Trail, trailCount + 1);
             }
 
-            // ---- header: view tabs, then the settings (their buttons cycle them) ----
-            string[] tabs =
-            {
-                "V-N", "LIFT", cfg.OverrideAoa.Value == OverrideAoa.LiftPeak ? "OVR PEAK" : "OVR FREE",
-                $"OVR G{cfg.OverrideG.Value:0.##}", $"SLIP {cfg.RollSideslip.Value:0}",
-            };
-            for (int i = 0; i < 5; i++)
-            {
-                Rect r = TabRect(i);
-                bool on = i < 2 && liftView == (i == 1);
-                if (on) Fill(r, Green, 0.01f * S);
-                else Border(r, i < 2 ? GreenDim : Green, Mathf.Max(1f, 0.004f * S), 0.01f * S);
-                Text(r, tabs[i], 0.03f, on ? Black : i < 2 ? GreenDim : Green, TextAnchor.MiddleCenter, false);
-            }
+            // ---- header status (right of the tabs) ----
             bool governing = Math.Abs(gov.Governed - gov.Wanted) > 0.01f || Math.Abs(gov.GovernedRoll - gov.WantedRoll) > 0.01f;
             string status = f.LimitOverride ? "AOA OVRD" : !limited ? "ASSIST OFF" : governing ? "LIMITING" : "";
             Color statusCol = f.LimitOverride || !limited ? Amber : Green;
