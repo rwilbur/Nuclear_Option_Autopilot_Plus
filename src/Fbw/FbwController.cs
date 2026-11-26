@@ -152,23 +152,62 @@ namespace AutopilotMod.Fbw
         public void AfterFilter(Aircraft aircraft)
         {
             if (link == null || aircraft != link.Aircraft || mode.Value == FbwMode.Off) return;
-            if (flying && !flight.Shared) return;
             try
             {
                 if (flying)
                 {
-                    flight.AfterFilter(); // multiplayer mode: keep the pilot's inputs, put the command back
-                    return;
+                    if (flight.Shared) flight.AfterFilter(); // multiplayer mode: keep the pilot's inputs, put the command back
                 }
-                link.HoldEngines();
-                // the engines read the inputs in the same tick they are filtered, one tick sooner than the surfaces
-                ControlInputs from = link.Shared;
-                foreach (EngineLink e in link.Engines) Copy(from, e.Inputs);
+                else
+                {
+                    link.HoldEngines();
+                    // the engines read the inputs in the same tick they are filtered, one tick sooner than the surfaces
+                    ControlInputs from = link.Shared;
+                    foreach (EngineLink e in link.Engines) Copy(from, e.Inputs);
+                }
+                EngineOutTest();
             }
             catch (Exception e)
             {
                 Fail(e);
             }
+        }
+
+        /// <summary>
+        /// Development test, not saved (off at every launch): -1 / +1 holds the outermost left / right jet engine at idle through its own
+        /// inputs, the nearest the controls come to an engine-out (idle still gives about 7.5% thrust; the game has no per-engine
+        /// switch, and a real failure comes only from hits). Any mode but Off; Passthrough flies it on the stock fly-by-wire, to compare.
+        /// </summary>
+        public int TestEngineOut;
+
+        /// <summary>The engine the test holds at idle on this aircraft, or null (off, or no engine out on that side).</summary>
+        public EngineLink TestEngine()
+        {
+            if (TestEngineOut == 0 || link == null) return null;
+            EngineLink pick = null;
+            float best = 0.3f; // m off the centreline: a centreline engine is no engine-out test
+            Transform root = link.Aircraft.transform;
+            foreach (EngineLink e in link.Engines)
+            {
+                Transform t = e.Transform;
+                if (t == null) continue;
+                float x = root.InverseTransformPoint(t.position).x * TestEngineOut;
+                if (x > best) { best = x; pick = e; }
+            }
+            return pick;
+        }
+
+        // the test engine to idle, after everything else has written the engines' inputs and before they read them
+        private void EngineOutTest()
+        {
+            EngineLink e = TestEngine();
+            if (e == null) return;
+            if (!e.Held)
+            {
+                e.Hold(); // multiplayer mode leaves the engines on the shared inputs: this one gets their copy
+                Copy(link.Shared, e.Inputs);
+            }
+            e.Inputs.throttle = 0f;
         }
 
         /// <summary>JobManager.FixedUpdateLate: the aero job's forces are in, the physics step is next.</summary>

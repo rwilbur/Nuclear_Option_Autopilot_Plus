@@ -62,6 +62,9 @@ namespace AutopilotMod.Fbw
 
         public bool Alive => jet != null || fan != null;
 
+        /// <summary>The engine's transform, or null once destroyed.</summary>
+        public Transform Transform => jet != null ? jet.transform : fan != null ? fan.transform : null;
+
         /// <summary>True if this link is for <paramref name="engine"/>.</summary>
         public bool Is(MonoBehaviour engine) => engine != null && (engine == jet || engine == fan);
 

@@ -54,8 +54,8 @@ namespace AutopilotMod
         private Rect TabRect(int i) => Sc(0.02f + 0.14f * i, 0.015f, 0.13f, 0.075f);
 
         // ---- the settings ----
-        private const int Rows = 7;
-        private Rect RowRect(int i) => Sc(0.03f, 0.11f + 0.088f * i, 0.94f, 0.078f);
+        private const int Rows = 8;
+        private Rect RowRect(int i) => Sc(0.03f, 0.11f + 0.08f * i, 0.94f, 0.07f);
 
         // the limit override's key: these, in turn (a key set in the .cfg shows by name until stepped past)
         private static readonly KeyCode[] Keys = { KeyCode.Mouse1, KeyCode.Mouse2, KeyCode.Mouse3, KeyCode.Mouse4, KeyCode.None };
@@ -74,7 +74,11 @@ namespace AutopilotMod
                 case 3: cfg.OverrideG.Value = Next(GSteps, cfg.OverrideG.Value); break;
                 case 4: cfg.RollSideslip.Value = Next(SlipSteps, cfg.RollSideslip.Value); break;
                 case 5: cfg.FbwTelemetry.Value = !cfg.FbwTelemetry.Value; break;
-                default: cfg.ExportAirframes.Value = !cfg.ExportAirframes.Value; break;
+                case 6: cfg.ExportAirframes.Value = !cfg.ExportAirframes.Value; break;
+                default:
+                    FbwController fbw = FbwController.Current;
+                    if (fbw != null) fbw.TestEngineOut = fbw.TestEngineOut == 0 ? -1 : fbw.TestEngineOut < 0 ? 1 : 0; // off, left, right
+                    break;
             }
         }
 
@@ -134,6 +138,16 @@ namespace AutopilotMod
                     value = cfg.FbwTelemetry.Value ? "ON" : "OFF";
                     changed = cfg.FbwTelemetry.Value != (bool)cfg.FbwTelemetry.DefaultValue;
                     hint = "LOGS EVERY TICK TO\nBEPINEX\\FBWLOGS";
+                    break;
+                case 7:
+                    FbwController fbw = FbwController.Current;
+                    int test = fbw?.TestEngineOut ?? 0;
+                    bool found = fbw?.TestEngine() != null;
+                    label = "TEST ENGINE OUT";
+                    value = test == 0 ? "OFF" : !found ? "NO ENGINE" : test < 0 ? "LEFT IDLE" : "RIGHT IDLE";
+                    changed = test != 0;
+                    hint = test != 0 && !found ? "NO ENGINE OFF THE CENTRELINE\nON THAT SIDE: NOTHING TO TEST"
+                        : "HOLDS ONE ENGINE AT IDLE (TEST)\nNOT SAVED: OFF AT EVERY LAUNCH";
                     break;
                 default:
                     label = "AIRFRAME EXPORT";

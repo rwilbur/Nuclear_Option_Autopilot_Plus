@@ -288,6 +288,10 @@ Choices, and the evidence for them:
   - Known corner: the Ifrit at 65 m/s with full thrust on one engine sits at the edge of its roll capacity. Hands-off, its bank
     drifts about 16 deg in 4 s (34 deg and still rolling without the cut). The stick still stops it.
 - In the bench the speed is held, so it cannot show what the cut costs in speed.
+- **In-game test.** The game has no per-engine switch, and a real failure only comes from hits. So the envelope display's SET
+  page has TEST ENGINE OUT (off / left / right, not saved), which holds the outermost engine on that side at idle through its
+  own inputs. Idle still gives about 7.5% thrust, about 92% of a real engine-out's asymmetry, with no afterburner. It works in
+  every mode but Off. Passthrough flies it on the stock fly-by-wire, as the baseline to compare against.
 - **Ground steering** is not started. Full mode hands back to stock below 60 m/s and 5 m, so the nose wheel and brakes stay
   on the shared (stock) inputs. Doing more needs a ground model in the bench.
 
