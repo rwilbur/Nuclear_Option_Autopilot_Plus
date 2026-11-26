@@ -292,7 +292,7 @@ Choices, and the evidence for them:
   page has TEST ENGINE OUT (off / left / right, not saved), which holds the outermost engine on that side at idle through its
   own inputs. Idle still gives about 7.5% thrust, about 92% of a real engine-out's asymmetry, with no afterburner. It works in
   every mode but Off. Passthrough flies it on the stock fly-by-wire, as the baseline to compare against.
-- **Ground steering** is not started. Full mode hands back to stock below 60 m/s and 5 m, so the nose wheel and brakes stay
+- **Ground steering** is not started. Full mode hands back to stock below 50 m/s and whenever a wheel carries weight (no height limit since 26 Nov, for sea-skimming), so the nose wheel and brakes stay
   on the shared (stock) inputs. Doing more needs a ground model in the bench.
 
 ### Phase 6 findings (bench, 25 Nov 2026)

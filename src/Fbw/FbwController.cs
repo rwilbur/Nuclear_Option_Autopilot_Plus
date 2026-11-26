@@ -44,8 +44,11 @@ namespace AutopilotMod.Fbw
     /// </summary>
     internal sealed class FbwController
     {
-        /// <summary>Full mode flies above this airspeed (m/s) and radar altitude, and lets go below the lower pair.</summary>
-        public const float EngageSpeed = 60f, ReleaseSpeed = 50f, EngageHeight = 5f, ReleaseHeight = 2f;
+        /// <summary>
+        /// Full mode flies above this airspeed (m/s) with no wheel carrying weight, and lets go below the lower one or on touchdown. No
+        /// height limit: sea-skimming is flown (it was 5 m to engage, 2 m to let go, which also kept it off the runway; the wheels do that now).
+        /// </summary>
+        public const float EngageSpeed = 60f, ReleaseSpeed = 50f;
 
         /// <summary>Set by the plugin; the Harmony hooks call through it.</summary>
         public static FbwController Current;
@@ -80,7 +83,11 @@ namespace AutopilotMod.Fbw
         public bool Flying => flying;
 
         /// <summary>Full mode's computer while it flies the held jet, else null (the envelope display reads it).</summary>
-        public FbwFlight Flight => flying ? flight : null;
+        public FbwFlight Flight => flying || observing ? flight : null;
+
+        private bool observing; // Full or Multiplayer mode, not flying: the envelope is still worked out, for the display
+        private int offWheels;  // ticks with no wheel carrying weight
+        private const int LiftoffTicks = 30;
 
         /// <summary>Start of the physics tick, before JobManager.ScheduleJobs.</summary>
         public void PreJobs()
@@ -98,11 +105,12 @@ namespace AutopilotMod.Fbw
                 bool shared = mode.Value == FbwMode.Multiplayer;
                 bool full = mode.Value == FbwMode.Full || shared;
                 if (flying && flight.Shared != shared) StopFlying("mode changed"); // Full <-> Multiplayer: a new computer next tick
-                bool airborne = flying
-                    ? ac.speed > ReleaseSpeed && ac.radarAlt > ReleaseHeight
-                    : ac.speed > EngageSpeed && ac.radarAlt > EngageHeight;
+                // engaging waits for half a second off the wheels (a bounce on touchdown doesn't flick it on); touchdown lets go at once
+                offWheels = link.OnWheels ? 0 : offWheels + 1;
+                bool airborne = flying ? offWheels > 0 && ac.speed > ReleaseSpeed : offWheels > LiftoffTicks && ac.speed > EngageSpeed;
                 if (full && airborne && !flying) StartFlying(state);
-                else if (flying && !(full && airborne)) StopFlying(full ? "slow or low" : "mode changed");
+                else if (flying && !(full && airborne)) StopFlying(full ? "slow or on the ground" : "mode changed");
+                observing = false;
 
                 if (flying)
                 {
@@ -131,6 +139,13 @@ namespace AutopilotMod.Fbw
                     // passthrough (and Full mode below its speed): the surfaces get exactly what their job would read now
                     ControlInputs from = link.Shared;
                     foreach (SurfaceLink s in link.Surfaces) Copy(from, s.Inputs);
+                    if (full)
+                    {
+                        // standby: the stock fly-by-wire flies, the envelope display still shows the jet's envelope
+                        EnsureFlight(shared);
+                        flight.Observe(state, dt);
+                        observing = true;
+                    }
                 }
                 else link.Release();
 
@@ -243,12 +258,18 @@ namespace AutopilotMod.Fbw
             log.LogInfo($"FBW: {ac.definition.unitName}, {link.Surfaces.Count} surfaces, {link.Engines.Count} jet engines ({mode.Value})");
         }
 
+        private void EnsureFlight(bool shared)
+        {
+            if (flight != null && flight.Shared == shared) return;
+            ControlsFilter cf = link.Aircraft.GetControlsFilter();
+            flight = new FbwFlight(link, cf != null ? cf.GetFlyByWire() : null, shared);
+        }
+
         private void StartFlying(in AirframeState state)
         {
             ControlsFilter cf = link.Aircraft.GetControlsFilter();
             stockFbw = cf != null ? cf.GetFlyByWire() : null;
-            bool shared = mode.Value == FbwMode.Multiplayer;
-            if (flight == null || flight.Shared != shared) flight = new FbwFlight(link, stockFbw, shared);
+            EnsureFlight(mode.Value == FbwMode.Multiplayer);
             // the stock FBW stops reshaping the shared inputs: they stay the pilot's stick (plus hover and aim assist)
             if (stockFbw != null)
             {

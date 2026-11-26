@@ -17,7 +17,8 @@ namespace AutopilotMod
     /// steady roll rate the yaw can coordinate.
     /// - SET: every [FlyByWire] setting (mode, the limit override's key, AoA and g, the roll's sideslip allowance, telemetry, airframe
     ///   export). Tap a row to step it; amber = changed from its default. Saved to the .cfg at once.
-    /// Shown whenever you fly an aircraft, so the mode can be switched on from here; the plots need the fly-by-wire flying.
+    /// Shown whenever you fly an aircraft, so the mode can be switched on from here. The plots show in Full and Multiplayer mode, on the
+    /// ground and at any speed too (STANDBY: the stock fly-by-wire flies below 60 m/s and with weight on the wheels).
     /// </summary>
     internal sealed class EnvelopePage : MfdFrame
     {
@@ -223,7 +224,7 @@ namespace AutopilotMod
             if (f == null || !f.Curve.Known) // the web mirror renders it out of the jet too
             {
                 string why = f != null ? "ENVELOPE..." : cfg.FbwMode.Value == FbwMode.Off || cfg.FbwMode.Value == FbwMode.Passthrough
-                    ? "FBW OFF\nTURN IT ON IN SET" : "FBW STANDBY\nFLIES ABOVE 60 M/S AND 5 M";
+                    ? "FBW OFF\nTURN IT ON IN SET" : "FBW STANDBY";
                 Text(Sc(0.05f, 0.35f, 0.9f, 0.3f), why, 0.05f, GreenDim, TextAnchor.MiddleCenter, false);
                 return;
             }
@@ -252,8 +253,9 @@ namespace AutopilotMod
             }
 
             // ---- header status (right of the tabs) ----
-            bool governing = Math.Abs(gov.Governed - gov.Wanted) > 0.01f || Math.Abs(gov.GovernedRoll - gov.WantedRoll) > 0.01f;
-            string status = f.LimitOverride ? "AOA OVRD" : !limited ? "ASSIST OFF" : governing ? "LIMITING" : "";
+            bool standby = !(FbwController.Current?.Flying ?? false); // the stock fly-by-wire flies: slow or on the ground
+            bool governing = !standby && (Math.Abs(gov.Governed - gov.Wanted) > 0.01f || Math.Abs(gov.GovernedRoll - gov.WantedRoll) > 0.01f);
+            string status = standby ? "STANDBY" : f.LimitOverride ? "AOA OVRD" : !limited ? "ASSIST OFF" : governing ? "LIMITING" : "";
             Color statusCol = f.LimitOverride || !limited ? Amber : Green;
             bool blink = f.LimitOverride && Mathf.Repeat(Time.unscaledTime, 0.6f) > 0.4f;
             if (status.Length > 0 && !blink) Text(Sc(0.4f, 0.125f, 0.56f, 0.06f), status, 0.036f, statusCol, TextAnchor.MiddleRight);

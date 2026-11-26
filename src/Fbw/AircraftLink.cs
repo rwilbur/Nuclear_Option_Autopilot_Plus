@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using HarmonyLib;
 using UnityEngine;
 
 namespace AutopilotMod.Fbw
@@ -51,6 +52,29 @@ namespace AutopilotMod.Fbw
             }
             AeroParts = Find<AeroPart>(aircraft);
             Aero = new GameAero();
+            gears = Find<LandingGear>(aircraft);
+        }
+
+        private static readonly AccessTools.FieldRef<LandingGear, AeroPart> GearPart = AccessTools.FieldRefAccess<LandingGear, AeroPart>("attachedPart");
+        private readonly List<LandingGear> gears;
+
+        /// <summary>
+        /// A wheel still on the aircraft carries weight (the stock fly-by-wire's own test: LandingGear.WeightOnWheel(0.05)). Retracted
+        /// gear and water carry none, so sea-skimming is airborne.
+        /// </summary>
+        public bool OnWheels
+        {
+            get
+            {
+                foreach (LandingGear g in gears)
+                {
+                    if (g == null) continue;
+                    AeroPart p = GearPart(g);
+                    if (p != null && p.IsDetached()) continue; // a leg shot off, lying on the ground
+                    if (g.WeightOnWheel(0.05f)) return true;
+                }
+                return false;
+            }
         }
 
         /// <summary>The aircraft's shared inputs: the pilot's (filtered) command, and what other players' copies replay.</summary>

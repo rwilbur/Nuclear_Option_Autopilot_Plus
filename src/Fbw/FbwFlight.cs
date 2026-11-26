@@ -109,6 +109,24 @@ namespace AutopilotMod.Fbw
         }
 
         /// <summary>
+        /// Standby (the stock fly-by-wire flies): the envelope only, for the display. Slower than this the air says little (on the ground,
+        /// any wind from any side), so the lift curve is swept along the nose instead: its lift per airspeed squared doesn't depend on the speed.
+        /// </summary>
+        public void Observe(in AirframeState state, float dt)
+        {
+            const float SweepSpeed = 100f, Slow = 30f; // m/s
+            AirframeState s = state;
+            if (s.Speed < Slow)
+            {
+                s.VCg = link.Aircraft.rb.transform.forward * SweepSpeed;
+                s.Alpha = s.Beta = 0f;
+            }
+            Q4 rot = GameAero.Q(link.Aircraft.rb.rotation);
+            Envelope(s, rot, link.Mass, link.Mass.Cg, link.Aero, dt);
+            Computer.Last = State(state); // the readouts: the jet as it is
+        }
+
+        /// <summary>
         /// Multiplayer mode, after Aircraft.FilterInputs: the pilot's stick (and hover, aim assist, the autopilot) just landed in the
         /// shared inputs. Keep it for the next tick and put the command back, for the engines' FixedUpdate and the network.
         /// </summary>
