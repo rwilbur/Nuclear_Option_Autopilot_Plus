@@ -12,10 +12,11 @@ namespace AutopilotMod.Fbw
     using RateLaw = Control.RateLaw;
 
     /// <summary>
-    /// Full mode on the held aircraft: each tick, fills the <see cref="FlightComputer"/>'s effector slots from
-    /// the game (positions, this tick's reach, effectiveness from the game's own plate at the live flow) and
-    /// writes its commands back as each surface's and jet engine's own inputs. Slots: the control surfaces with
-    /// travel, then two per vectoring engine (nozzle pitch, nozzle yaw). The same work the offline bench does
+    /// Full or multiplayer mode on the held aircraft: each tick, fills the <see cref="FlightComputer"/>'s effector slots from
+    /// the game (positions, this tick's reach, effectiveness from the game's own plate at the live flow) and writes its
+    /// commands back. Full mode: each surface's and jet engine's own inputs; slots are the control surfaces with travel, the
+    /// splits, then two per vectoring engine (nozzle pitch, nozzle yaw). Multiplayer mode: the three shared inputs through the
+    /// stock mixing (<see cref="SharedMix"/>), so other players see exactly what flies. The same work the offline bench does
     /// (tests/FbwBench.cs), with game objects.
     /// </summary>
     internal sealed class FbwFlight
@@ -38,9 +39,17 @@ namespace AutopilotMod.Fbw
 
         public readonly FlightComputer Computer;
 
-        public FbwFlight(AircraftLink link, ControlsFilter.FlyByWire stock)
+        /// <summary>Multiplayer mode: the shared inputs only.</summary>
+        public readonly bool Shared;
+        private readonly SharedMix mix;
+        private readonly ControlInputs pilot = new ControlInputs(); // multiplayer mode: the pilot's inputs, saved before they are overwritten
+        private readonly float[] written = new float[3];            // multiplayer mode: the shared pitch, roll, yaw written last
+        private float writtenThrottle = -1f;
+
+        public FbwFlight(AircraftLink link, ControlsFilter.FlyByWire stock, bool shared)
         {
             this.link = link;
+            Shared = shared;
             // Sorted from each surface's own settings, so every surface gets its slot for the whole flight; each tick a slot
             // whose surface can't act right now (shot off, locked, no flow) sits that tick out and comes back when it can.
             foreach (SurfaceLink s in link.Surfaces)
@@ -60,12 +69,13 @@ namespace AutopilotMod.Fbw
                 Vector3 v = e.Vectoring;
                 if ((v.x > 0f || v.y > 0f) && e.VectoringTransform != null) vectoring.Add(e);
             }
-            Computer = new FlightComputer(NozzleBase + 2 * vectoring.Count, link.Engines.Count);
+            Computer = new FlightComputer(shared ? SharedMix.Slots : NozzleBase + 2 * vectoring.Count, link.Engines.Count);
+            mix = shared ? new SharedMix(surfaces.Count + vectoring.Count) : null;
             curve = new LiftCurve(link.AeroParts.Count);
             foreach (SurfaceLink s in link.Surfaces)
                 if (s.Part != null && s.Hinge != null) surfaceOf[s.Part] = s;
-            for (int k = 0; k < splits.Count; k++) Computer.CostScale[surfaces.Count + k] = 3f; // drag costs speed: closed when not needed
-            for (int k = 0; k < vectoring.Count; k++)
+            for (int k = 0; k < splits.Count && !shared; k++) Computer.CostScale[surfaces.Count + k] = 3f; // drag costs speed: closed when not needed
+            for (int k = 0; k < vectoring.Count && !shared; k++)
             {
                 Computer.CostScale[NozzleBase + 2 * k] = 10f; // nozzles back to centre with spare freedom: thrust goes forward
                 Computer.CostScale[NozzleBase + 2 * k + 1] = 10f;
@@ -83,7 +93,43 @@ namespace AutopilotMod.Fbw
         public int Nozzles => vectoring.Count;
         private int NozzleBase => surfaces.Count + splits.Count;
 
-        public void Engage(in AirframeState s) => Computer.Engage(State(s));
+        public void Engage(in AirframeState s)
+        {
+            if (Shared)
+            {
+                // the mixing follows what the stock fly-by-wire wrote last; the pilot's inputs are those until the next filter
+                ControlInputs sh = link.Shared;
+                written[0] = sh.pitch;
+                written[1] = sh.roll;
+                written[2] = sh.yaw;
+                writtenThrottle = -1f;
+                Copy(sh, pilot);
+            }
+            Computer.Engage(State(s));
+        }
+
+        /// <summary>
+        /// Multiplayer mode, after Aircraft.FilterInputs: the pilot's stick (and hover, aim assist, the autopilot) just landed in the
+        /// shared inputs. Keep it for the next tick and put the command back, for the engines' FixedUpdate and the network.
+        /// </summary>
+        public void AfterFilter()
+        {
+            ControlInputs sh = link.Shared;
+            float throttle = pilot.throttle;
+            Copy(sh, pilot);
+            // the throttle lever is written in Update, not every tick: unchanged since our write means the lever didn't move
+            if (sh.throttle == writtenThrottle) pilot.throttle = throttle;
+            Apply();
+        }
+
+        private void Apply()
+        {
+            ControlInputs sh = link.Shared;
+            sh.pitch = written[0];
+            sh.roll = written[1];
+            sh.yaw = written[2];
+            if (writtenThrottle >= 0f) sh.throttle = writtenThrottle;
+        }
 
         public FlightState State(in AirframeState s)
         {
@@ -104,7 +150,36 @@ namespace AutopilotMod.Fbw
             V3 cg = mass.Cg;
             GameAero aero = link.Aero;
             Envelope(state, rot, mass, cg, aero, dt);
+            ControlInputs pilot = Shared ? this.pilot : link.Shared;
+            bool idle = pilot.throttle == 0f;
+            if (Shared) FillShared(state, rot, mass, cg, aero, idle, dt);
+            else FillFull(state, rot, mass, cg, aero, idle, dt);
 
+            // engine-out yaw: each jet engine's thrust yaw in stability axes, along the body axis (a swivelled nozzle's yaw is the allocator's)
+            float ca = (float)Math.Cos(state.Alpha), sa = (float)Math.Sin(state.Alpha);
+            V3 bodyFwd = rot * new V3(0f, 0f, 1f);
+            for (int i = 0; i < link.Engines.Count; i++)
+            {
+                EngineLink e = link.Engines[i];
+                V3 m = V3.Zero;
+                JetNozzle[] nozzles = e.Alive ? e.Nozzles : null;
+                if (nozzles != null)
+                    foreach (JetNozzle n in nozzles)
+                        if (EngineLink.Pushing(n, out Transform tt, out float thrust) && thrust > 0f)
+                            m += V3.Cross(GameAero.V(tt.position) - cg, bodyFwd * thrust);
+                V3 acc = FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, m));
+                fc.Cut.Yaw[i] = acc.Z * ca - acc.X * sa;
+            }
+            fc.Cut.Enabled = !LimitOverride; // the override gives the pilot all the thrust there is, sideslip or not
+
+            fc.Step(pilot.pitch, pilot.roll, pilot.yaw, State(state), dt);
+            if (Shared) WriteShared(pilot);
+            else Write(pilot, idle);
+        }
+
+        private void FillFull(in AirframeState state, Q4 rot, MassProps mass, V3 cg, GameAero aero, bool idle, float dt)
+        {
+            FlightComputer fc = Computer;
             for (int j = 0; j < surfaces.Count; j++)
             {
                 SurfaceLink s = surfaces[j];
@@ -136,8 +211,6 @@ namespace AutopilotMod.Fbw
             }
 
             // split surfaces: drag on one side, yaw. At idle throttle the game opens them all (the airbrake): left to stock then.
-            ControlInputs pilot = link.Shared;
-            bool idle = pilot.throttle == 0f;
             Vector3 wind = link.Aircraft.GetWindVelocity();
             for (int k = 0; k < splits.Count; k++)
             {
@@ -162,45 +235,76 @@ namespace AutopilotMod.Fbw
                 EngineLink e = vectoring[k];
                 int jx = NozzleBase + 2 * k, jy = jx + 1;
                 Vector3 now = e.Alive ? e.Nozzle : Vector3.zero;
-                bool on = e.Alive && state.Speed <= e.VectoringMaxAirspeed;
-                V3 mx = V3.Zero, my = V3.Zero;
-                Transform vt = on ? e.VectoringTransform : null;
-                if (vt != null)
-                {
-                    V3 pitchAxis = GameAero.V(vt.right), yawAxis = GameAero.V(vt.parent != null ? vt.parent.up : vt.up);
-                    foreach (JetNozzle n in e.Nozzles)
-                    {
-                        if (!EngineLink.Pushing(n, out Transform tt, out float thrust) || thrust <= 0f) continue;
-                        V3 arm = GameAero.V(tt.position) - cg, fwd = GameAero.V(tt.forward);
-                        mx += Effectiveness.Nozzle(pitchAxis, fwd, thrust, arm);
-                        my += Effectiveness.Nozzle(yawAxis, fwd, thrust, arm);
-                    }
-                }
+                bool vt = NozzleMoments(e, state.Speed, cg, out V3 mx, out V3 my);
                 Vector3 vec = e.Vectoring;
                 float step = NozzleSlew * dt * FlightComputer.ReachTicks;
-                Nozzle(fc, jx, vt != null && vec.x > 0f && mx.SqrMagnitude > 0f, now.x, vec.x, step, mx, mass, rot);
-                Nozzle(fc, jy, vt != null && vec.y > 0f && my.SqrMagnitude > 0f && link.Aircraft.radarAlt >= 3f, now.y, vec.y, step, my, mass, rot);
+                Nozzle(fc, jx, vt && vec.x > 0f && mx.SqrMagnitude > 0f, now.x, vec.x, step, mx, mass, rot);
+                Nozzle(fc, jy, vt && vec.y > 0f && my.SqrMagnitude > 0f && link.Aircraft.radarAlt >= 3f, now.y, vec.y, step, my, mass, rot);
             }
+        }
 
-            // engine-out yaw: each jet engine's thrust yaw in stability axes, along the body axis (a swivelled nozzle's yaw is the allocator's)
-            float ca = (float)Math.Cos(state.Alpha), sa = (float)Math.Sin(state.Alpha);
-            V3 bodyFwd = rot * new V3(0f, 0f, 1f);
-            for (int i = 0; i < link.Engines.Count; i++)
+        /// <summary>Multiplayer mode: the same effectors, read the same way, as the three shared inputs through the stock mixing.</summary>
+        private void FillShared(in AirframeState state, Q4 rot, MassProps mass, V3 cg, GameAero aero, bool idle, float dt)
+        {
+            mix.Begin(written[0], written[1], written[2]);
+            foreach (SurfaceLink s in surfaces)
             {
-                EngineLink e = link.Engines[i];
-                V3 m = V3.Zero;
-                JetNozzle[] nozzles = e.Alive ? e.Nozzles : null;
-                if (nozzles != null)
-                    foreach (JetNozzle n in nozzles)
-                        if (EngineLink.Pushing(n, out Transform tt, out float thrust) && thrust > 0f)
-                            m += V3.Cross(GameAero.V(tt.position) - cg, bodyFwd * thrust);
-                V3 acc = FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, m));
-                fc.Cut.Yaw[i] = acc.Z * ca - acc.X * sa;
+                if (!s.JobReady || s.Locked || s.Part.rb == null || !aero.LiveInput(s.Part, out Plate.Input input)) continue;
+                s.ReadChannels(range, current);
+                float angle = current[0] + current[1] + current[2];
+                V3 hinge = GameAero.V(s.Hinge.right);
+                V3 m = Effectiveness.Surface(input, hinge, GameAero.V(s.Part.rb.worldCenterOfMass) - cg, aero.Lift, aero.Drag);
+                Effectiveness.AttachedRange(input, hinge, angle, aero.Peaks, 1f, out float aLo, out float aHi);
+                float travel = Math.Abs(range[0]) + Math.Abs(range[1]) + Math.Abs(range[2]);
+                // every channel the stock mixing drives, the ailerons' pitch included (it cancels left to right): this is what moves
+                mix.Surface(FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, m)), range, s.Servo, Math.Max(aLo, -travel), Math.Min(aHi, travel), dt);
             }
-            fc.Cut.Enabled = !LimitOverride; // the override gives the pilot all the thrust there is, sideslip or not
+            Vector3 wind = link.Aircraft.GetWindVelocity();
+            foreach (SurfaceLink s in splits)
+            {
+                if (!s.JobReady || s.Locked || s.Part.rb == null) continue;
+                V3 v = GameAero.V(s.Part.rb.velocity - wind);
+                V3 m = Effectiveness.Split(v, link.Aircraft.airDensity, s.SplitDrag, GameAero.V(s.Part.rb.worldCenterOfMass) - cg);
+                mix.Split(FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, m)), s.YawSplitFactor, s.MaxSplit, idle);
+            }
+            foreach (EngineLink e in vectoring)
+            {
+                if (!NozzleMoments(e, state.Speed, cg, out V3 mx, out V3 my)) continue;
+                Vector3 vec = e.Vectoring, gain = e.Gain;
+                mix.Nozzle(FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, mx)), FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, my)),
+                           mx.SqrMagnitude > 0f, my.SqrMagnitude > 0f && link.Aircraft.radarAlt >= 3f, vec.x, vec.y, vec.z, gain.x, gain.z, NozzleSlew, dt);
+            }
+            mix.Fill(Computer);
+        }
 
-            fc.Step(pilot.pitch, pilot.roll, pilot.yaw, State(state), dt);
-            Write(pilot, idle);
+        // a vectoring engine's moment per degree of nozzle pitch and yaw (world), from its pushing nozzles; false when it can't vector now
+        private static bool NozzleMoments(EngineLink e, float speed, V3 cg, out V3 mx, out V3 my)
+        {
+            mx = my = V3.Zero;
+            Transform vt = e.Alive && speed <= e.VectoringMaxAirspeed ? e.VectoringTransform : null;
+            if (vt == null) return false;
+            V3 pitchAxis = GameAero.V(vt.right), yawAxis = GameAero.V(vt.parent != null ? vt.parent.up : vt.up);
+            foreach (JetNozzle n in e.Nozzles)
+            {
+                if (!EngineLink.Pushing(n, out Transform tt, out float thrust) || thrust <= 0f) continue;
+                V3 arm = GameAero.V(tt.position) - cg, fwd = GameAero.V(tt.forward);
+                mx += Effectiveness.Nozzle(pitchAxis, fwd, thrust, arm);
+                my += Effectiveness.Nozzle(yawAxis, fwd, thrust, arm);
+            }
+            return true;
+        }
+
+        /// <summary>Multiplayer mode: the command as the shared inputs (now, for the surface job; again after the filter).</summary>
+        private void WriteShared(ControlInputs pilot)
+        {
+            float[] cmd = Computer.Command;
+            for (int c = 0; c < 3; c++) written[c] = Math.Max(-1f, Math.Min(1f, cmd[c]));
+            // one throttle for every engine: the engine-out cut takes them all back by the most any one needs (with one dead, just the
+            // live one), never to exactly 0, which would open the idle airbrake
+            float cut = 1f;
+            for (int i = 0; i < link.Engines.Count; i++) cut = Math.Min(cut, Computer.Cut.Scale[i]);
+            writtenThrottle = pilot.throttle > 0f ? Math.Max(1e-3f, pilot.throttle * cut) : 0f;
+            Apply();
         }
 
         /// <summary>

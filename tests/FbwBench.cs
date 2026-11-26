@@ -51,7 +51,7 @@ internal sealed class FbwBench
     {
         public string Name;
         public V3 Pos, Fwd0, PitchAxis, YawAxis;
-        public float VecX, VecY, MaxV, MaxThrust, Ratio, Spool, Ax, Ay, CmdX, CmdY;
+        public float VecX, VecY, VecZ, GainX = 1f, GainZ = 4f, MaxV, MaxThrust, Ratio, Spool, Ax, Ay, CmdX, CmdY;
         public bool Dead;
         public float Thrust => Dead ? 0f : MaxThrust * Ratio;
     }
@@ -77,6 +77,11 @@ internal sealed class FbwBench
     public readonly float GLimit, QMax, PMax, StockAlphaLimit;
     public readonly LiftCurve Curve;
     public bool Assist = true; // Stability Assist
+
+    /// <summary>Multiplayer mode (set before <see cref="Start"/>): the FBW writes only the three shared inputs, and stock mixing moves everything.</summary>
+    public bool Shared;
+    private SharedMix mix;
+    private readonly float[] sharedIn = new float[3]; // the shared inputs the mixing follows (pitch, roll, yaw)
 
     /// <summary>The pilot's throttle, as each engine's thrust ratio (set before <see cref="Start"/>).</summary>
     public float Throttle = 0.5f;
@@ -195,7 +200,9 @@ internal sealed class FbwBench
             {
                 Name = (string)e["path"],
                 Pos = Vec(n["position"]), Fwd0 = Vec(n["forward"]), PitchAxis = Vec(vt["right"]), YawAxis = Vec(vt["up"]),
-                VecX = vectors ? tv.X : 0f, VecY = vectors ? tv.Y : 0f, MaxV = F(e, "thrustVectoringMaxAirspeed"),
+                VecX = vectors ? tv.X : 0f, VecY = vectors ? tv.Y : 0f, VecZ = vectors ? tv.Z : 0f, MaxV = F(e, "thrustVectoringMaxAirspeed"),
+                GainX = Field(e, "thrustVectoringGain") != null ? V(Field(e, "thrustVectoringGain")).X : 1f,
+                GainZ = Field(e, "thrustVectoringGain") != null ? V(Field(e, "thrustVectoringGain")).Z : 4f,
                 MaxThrust = Field(e, "maxThrust") != null ? F(e, "maxThrust") : 60000f,
                 Spool = rpmSpan > 0f && F(e, "spoolRate") > 0f ? F(e, "spoolRate") / rpmSpan : 0.35f, // thrust ratio per second, about
             };
@@ -280,7 +287,9 @@ internal sealed class FbwBench
             if (V3.Dot(f, new V3(0f, 1f, 0f)) < mass.Mass * G) lo = a; else hi = a;
         }
         SetFlight(speed, 0.5f * (lo + hi));
-        Fc = new FlightComputer(Slots, engines.Count);
+        Fc = new FlightComputer(Shared ? SharedMix.Slots : Slots, engines.Count);
+        mix = new SharedMix(surfaces.Count + nozzles.Count);
+        Array.Clear(sharedIn, 0, 3);
         Fc.Law.PMax = PMax;
         Fc.Law.QMax = QMax;
         Fc.Law.NzMax = GLimit;
@@ -351,6 +360,11 @@ internal sealed class FbwBench
     /// <summary>What the game adapter does each tick: positions, reach and effectiveness of every effector slot.</summary>
     private void Controller(in FlightState s)
     {
+        if (Shared)
+        {
+            ControllerShared(s);
+            return;
+        }
         V3 vb = rot.Inverse * vel, cg = mass.Cg;
         FillCurve(vb, s.Alpha);
         V3 rollAxis = vb / -vb.Magnitude; // right roll about the flight path, in Unity's left-handed sign
@@ -419,19 +433,100 @@ internal sealed class FbwBench
             }
             else Fc.Disable(jy, n.Ay);
         }
-        // each engine's thrust yaw in stability axes (what the adapter reads from the live nozzles)
-        float ca = (float)Math.Cos(s.Alpha), sa = (float)Math.Sin(s.Alpha);
+        EngineYaw(s.Alpha);
+    }
+
+    // each engine's thrust yaw in stability axes (what the adapter reads from the live nozzles)
+    private void EngineYaw(float alpha)
+    {
+        float ca = (float)Math.Cos(alpha), sa = (float)Math.Sin(alpha);
         for (int k = 0; k < engines.Count; k++)
         {
             Nozzle n = engines[k];
             // along the body axis, not the nozzle: a swivelled nozzle's yaw is the allocator's, not an asymmetry
-            V3 acc = Body(MassProps.Solve(mass.Inertia, V3.Cross(n.Pos - cg, new V3(0f, 0f, n.Thrust))));
+            V3 acc = Body(MassProps.Solve(mass.Inertia, V3.Cross(n.Pos - mass.Cg, new V3(0f, 0f, n.Thrust))));
             Fc.Cut.Yaw[k] = acc.Z * ca - acc.X * sa;
         }
     }
 
+    /// <summary>Multiplayer mode: the same effectors, as the three shared inputs through stock mixing (what the adapter does).</summary>
+    private void ControllerShared(in FlightState s)
+    {
+        V3 vb = rot.Inverse * vel, cg = mass.Cg;
+        FillCurve(vb, s.Alpha);
+        V3 rollAxis = vb / -vb.Magnitude;
+        Fc.RollAccel = Body(FlightComputer.RollResponse(mass.Inertia, Curve.RateMoment(rollAxis), omega, rollAxis));
+        Fc.LiftSlope = Curve.Slope;
+        Fc.PitchStiffness = Body(MassProps.Solve(mass.Inertia, Curve.MomentSlope)).Y;
+        Fc.CouplingGain = (float)((mass.Inertia[4] - mass.Inertia[8]) / mass.Inertia[0]);
+        Fc.AlphaMax = Curve.AlphaMax;
+        Fc.AlphaMin = Curve.AlphaMin;
+        Fc.Assist = Assist;
+        mix.Begin(sharedIn[0], sharedIn[1], sharedIn[2]);
+        foreach (Surface sf in surfaces)
+        {
+            if (sf.Lost) continue;
+            Plate.Input input = Input(sf.Part, vb, sf.Angle);
+            Effectiveness.AttachedRange(input, sf.Hinge, sf.Angle, peaks, 1f, out float aLo, out float aHi);
+            float travel = Math.Abs(sf.Range[0]) + Math.Abs(sf.Range[1]) + Math.Abs(sf.Range[2]);
+            V3 acc = Body(MassProps.Solve(mass.Inertia, Effectiveness.Surface(input, sf.Hinge, sf.Part.Com - cg, lift, drag)));
+            mix.Surface(acc, sf.Range, sf.Servo, Math.Max(aLo, -travel), Math.Min(aHi, travel), Dt);
+        }
+        foreach (Surface sf in splits)
+        {
+            if (sf.Lost) continue;
+            V3 v = vb + V3.Cross(omega, sf.Part.Com - cg);
+            mix.Split(Body(MassProps.Solve(mass.Inertia, Effectiveness.Split(v, Rho, sf.SplitDrag, sf.Part.Com - cg))), sf.YawSplitFactor, sf.MaxSplit, false);
+        }
+        foreach (Nozzle n in nozzles)
+        {
+            if (s.Speed > n.MaxV) continue;
+            V3 fwd = NozzleForward(n, n.Ax, n.Ay), arm = n.Pos - cg;
+            mix.Nozzle(Body(MassProps.Solve(mass.Inertia, Effectiveness.Nozzle(n.PitchAxis, fwd, n.Thrust, arm))),
+                       Body(MassProps.Solve(mass.Inertia, Effectiveness.Nozzle(n.YawAxis, fwd, n.Thrust, arm))),
+                       true, true, n.VecX, n.VecY, n.VecZ, n.GainX, n.GainZ, 70f, Dt);
+        }
+        mix.Fill(Fc);
+        EngineYaw(s.Alpha);
+    }
+
+    // multiplayer mode: the game's own mixing of the shared inputs (ControlSurfaceJob, Turbojet.FixedUpdate)
+    private void ActuateShared(float[] cmd)
+    {
+        for (int c = 0; c < 3; c++) sharedIn[c] = Clamp(cmd[c], -1f, 1f);
+        foreach (Surface sf in surfaces)
+            for (int c = 0; c < 3; c++)
+            {
+                float r = sf.Range[c];
+                sf.Cur[c] += Clamp(sharedIn[c] * r - sf.Cur[c], -sf.Servo * Dt, sf.Servo * Dt);
+                sf.Cur[c] = Clamp(sf.Cur[c], -Math.Abs(r), Math.Abs(r));
+            }
+        foreach (Surface sf in splits)
+        {
+            float target = Clamp(sf.YawSplitFactor * sharedIn[2] * sf.MaxSplit, 0f, sf.MaxSplit);
+            sf.Split += Clamp(target - sf.Split, -sf.Servo * Dt, sf.Servo * Dt);
+        }
+        foreach (Nozzle n in nozzles)
+        {
+            float px = -Clamp(sharedIn[0] * n.GainX, -1f, 1f) * n.VecX - Clamp(sharedIn[1] * n.GainZ, -1f, 1f) * n.VecZ;
+            float py = Clamp(-sharedIn[2], -1f, 1f) * n.VecY;
+            n.Ax += Clamp(px - n.Ax, -70f * Dt, 70f * Dt);
+            n.Ay += Clamp(py - n.Ay, -70f * Dt, 70f * Dt);
+            if (vel.Magnitude > n.MaxV) n.Ax = n.Ay = 0f;
+        }
+        // one shared throttle: the engine-out cut takes every engine back by the most any one needs (with one dead, just the live one)
+        float cut = 1f;
+        for (int k = 0; k < engines.Count; k++) cut = Math.Min(cut, Fc.Cut.Scale[k]);
+        foreach (Nozzle n in engines) n.Ratio += Clamp(Throttle * cut - n.Ratio, -n.Spool * Dt, n.Spool * Dt);
+    }
+
     private void Actuate(float[] cmd)
     {
+        if (Shared)
+        {
+            ActuateShared(cmd);
+            return;
+        }
         for (int j = 0; j < surfaces.Count; j++)
         {
             Surface sf = surfaces[j];

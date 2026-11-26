@@ -146,7 +146,7 @@ Choices, and the evidence for them:
 | 3 | INDI + allocator, plain rate laws, Full mode | ✅ Bench passes on the Revoker, Compass, Vortex and Ifrit; flown on the Compass, Vortex, Ifrit and Revoker (25 Nov 2026), Ifrit retest "much better" after splits became yaw effectors |
 | 4 | Laws + envelope governor | Bench ✅ (25 Nov 2026): full-stick pulls (200 and 110 m/s), rolling pulls, releases and pushes stay inside AoA and g on four jets, on and off model (see "Phase 4 findings"). In-game check pending |
 | 5 | Capacity limits: damage, stores, engine-out (throttle cut), ground steering | Bench ✅ (25 Nov 2026): parts shot off, wings at half effectiveness, a 1 t off-centre store and engine-out fly without departure on four jets (see "Phase 5 findings"). Ground steering not started. In-game check pending |
-| 6 | Multiplayer mode | Remote view matches (by construction); same laws pass the HQ checks |
+| 6 | Multiplayer mode | Bench ✅ (25 Nov 2026): the same laws pass the HQ and envelope checks through stock mixing on four jets (two marks loosened, see "Phase 6 findings"). Remote view matches by construction. In-game check pending |
 | 7 | Performance: timings, then threading / native if justified | Per-tick cost measured in game, with and without |
 | 8 | Autopilot integration: the A/P commands rates and g directly | A/P tests pass; stock FBW copies removed from the A/P |
 
@@ -290,6 +290,41 @@ Choices, and the evidence for them:
 - In the bench the speed is held, so it cannot show what the cut costs in speed.
 - **Ground steering** is not started. Full mode hands back to stock below 60 m/s and 5 m, so the nose wheel and brakes stay
   on the shared (stock) inputs. Doing more needs a ground model in the bench.
+
+### Phase 6 findings (bench, 25 Nov 2026)
+
+- **`FbwMode.Multiplayer`.** The same laws, envelope and INDI run, with the three shared inputs (pitch, roll, yaw) as the
+  computer's slots (`SharedMix`). Every surface and nozzle is left on the shared inputs, so stock mixing moves it, exactly as
+  on other players' screens.
+  - A slot's effect is the sum, over effectors, of the plate effect per degree times the degrees per unit input (the channel
+    ranges, the nozzle gains, the split mapping), taken where the mixing is now.
+  - Its box is one tick of servo travel, as an effect-weighted mean.
+- **Timing.** The command is written before the surface job copies the inputs, as in Full mode. After `FilterInputs` the
+  pilot's stick (with hover, aim assist and the autopilot) is saved, and the command is written back, for the engines and the
+  network. The throttle lever is written only in Update, so it is read as moved only when it differs from our last write.
+- **Stall on a shared input.**
+  - The input stops where less than half its current effect would still be on the attached side. It is never dragged back
+    toward the attached side.
+  - Every carrier's limit, as in Full mode: past their knee the Ifrit's tails gave a fifth of the pitch, while the nozzles on
+    the same input still pushed the nose down. The tails' limit dragged the input into the pull, and the AoA ran to 62-70 deg.
+  - No limit at all: the post-release roll runaways came back (178 deg/s on a Compass with a wingtip off).
+  - A 35% share brought the runaways back, and 65% let the Ifrit depart with an engine out, so the share is 50%.
+- **Engine-out** goes through the one shared throttle, cut by the most any engine needs. With one engine dead that cuts just
+  the live one. It is never cut to exactly 0, which would open the idle airbrake. Compass at 65 m/s, rolling into the dead
+  engine: sideslip 25 -> 9 deg.
+- **Results.** Model case: as good as Full mode on all four jets. Hold 0.01-0.25 deg/s, pitch and roll errors 0-2%,
+  full-roll sideslip 0.6-2.5 deg, no chatter. Every envelope pull, push, release and rolling pull stays inside its AoA and g
+  limits, in all five model-error cases.
+- **Two marks loosened** for this mode, both off model:
+  - Pitch overshoot to 30%: the Revoker reaches 24-27%. The shared pitch input stops at the canards' stall knee and holds the
+    nozzle there too. Full mode, whose nozzle goes on alone, reaches 17%.
+  - Off-model sideslip to 18 deg: the Vortex's rolling pull reaches 15-16 deg. Its V-tail pitches and yaws on the shared
+    channels.
+- **Damage cases are reported, not passed** (AoA and g are still checked and hold). One shared roll input can't work around a
+  lost aileron: the Revoker's roll rings out over about 2 s after release instead of stopping. With an engine out and a
+  rolling pull at 80 m/s, the Ifrit reaches 20 deg of sideslip. There the cut makes it worse (15 without), because cutting
+  the throttle also takes authority from the nozzles that share the roll input. A jet that is badly hurt flies better in Full
+  mode.
 
 Bench: a rigid-body simulator built on the effector models and each jet's export. It adds deliberate model
 error, delay, servo lag and part flex, because a plant that matches the model exactly makes everything look

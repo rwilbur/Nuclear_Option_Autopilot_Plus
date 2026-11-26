@@ -26,6 +26,11 @@ namespace AutopilotMod.Fbw
         /// <see cref="FbwController.EngageSpeed"/> only; stock below it and on the ground.
         /// </summary>
         Full,
+        /// <summary>
+        /// The same fly-by-wire as Full, writing only the shared pitch, roll and yaw (and the throttle's engine-out cut): every
+        /// surface and nozzle moves by the game's stock mixing, so other players see exactly what flies (docs/fbw/PLAN.md, phase 6).
+        /// </summary>
+        Multiplayer,
     }
 
     /// <summary>
@@ -90,7 +95,9 @@ namespace AutopilotMod.Fbw
                 float dt = Time.fixedDeltaTime;
                 AirframeState state = link.Sample(dt);
                 Aircraft ac = link.Aircraft;
-                bool full = mode.Value == FbwMode.Full;
+                bool shared = mode.Value == FbwMode.Multiplayer;
+                bool full = mode.Value == FbwMode.Full || shared;
+                if (flying && flight.Shared != shared) StopFlying("mode changed"); // Full <-> Multiplayer: a new computer next tick
                 bool airborne = flying
                     ? ac.speed > ReleaseSpeed && ac.radarAlt > ReleaseHeight
                     : ac.speed > EngageSpeed && ac.radarAlt > EngageHeight;
@@ -99,8 +106,12 @@ namespace AutopilotMod.Fbw
 
                 if (flying)
                 {
-                    link.HoldSurfaces();
-                    link.HoldEngines();
+                    if (shared) link.Release(); // every surface and engine on the shared inputs: stock mixing moves them
+                    else
+                    {
+                        link.HoldSurfaces();
+                        link.HoldEngines();
+                    }
                     KeyboardShortcut k = cfg.KeyLimitOverride.Value;
                     flight.LimitOverride = k.MainKey != KeyCode.None && Input.GetKey(k.MainKey) && k.Modifiers.All(Input.GetKey);
                     flight.OverridePeak = cfg.OverrideAoa.Value == OverrideAoa.LiftPeak;
@@ -140,9 +151,15 @@ namespace AutopilotMod.Fbw
         /// <summary>After Aircraft.FilterInputs, before the engines' FixedUpdate reads the inputs.</summary>
         public void AfterFilter(Aircraft aircraft)
         {
-            if (link == null || aircraft != link.Aircraft || flying || mode.Value == FbwMode.Off) return;
+            if (link == null || aircraft != link.Aircraft || mode.Value == FbwMode.Off) return;
+            if (flying && !flight.Shared) return;
             try
             {
+                if (flying)
+                {
+                    flight.AfterFilter(); // multiplayer mode: keep the pilot's inputs, put the command back
+                    return;
+                }
                 link.HoldEngines();
                 // the engines read the inputs in the same tick they are filtered, one tick sooner than the surfaces
                 ControlInputs from = link.Shared;
@@ -191,7 +208,8 @@ namespace AutopilotMod.Fbw
         {
             ControlsFilter cf = link.Aircraft.GetControlsFilter();
             stockFbw = cf != null ? cf.GetFlyByWire() : null;
-            flight ??= new FbwFlight(link, stockFbw);
+            bool shared = mode.Value == FbwMode.Multiplayer;
+            if (flight == null || flight.Shared != shared) flight = new FbwFlight(link, stockFbw, shared);
             // the stock FBW stops reshaping the shared inputs: they stay the pilot's stick (plus hover and aim assist)
             if (stockFbw != null)
             {

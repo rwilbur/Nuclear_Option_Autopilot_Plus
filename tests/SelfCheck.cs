@@ -16,8 +16,12 @@ internal static class SelfCheck
     {
         if (ok) return;
         failures++;
-        Console.WriteLine("FAIL: " + what);
+        Console.WriteLine("FAIL: " + benchTag + what);
     }
+
+    // the FBW bench runs twice: Full mode, then multiplayer mode (shared inputs through stock mixing), tagged
+    private static bool benchShared;
+    private static string benchTag = "";
 
     private static bool Near(float a, float b, float tol = 1e-3f) => Math.Abs(a - b) <= tol;
 
@@ -560,6 +564,11 @@ internal static class SelfCheck
 
         CheckFbwControl();
         CheckFbwBench();
+        benchShared = true;
+        benchTag = "[MP] ";
+        CheckFbwBench();
+        benchShared = false;
+        benchTag = "";
     }
 
     /// <summary>Bench flights of real airframes (tests/airframes) with the FBW flying: hold, pull, roll, and the same with the plant off-model.</summary>
@@ -589,7 +598,7 @@ internal static class SelfCheck
                 // the 90 m/s roll only checks tracking: in this bench trim the Vortex is near its pitch limit (nozzle at its stop,
                 // surfaces at 40-54 deg) and two weak surfaces trade every tick while the roll still tracks (known, 25 Nov)
                 float chatter = Math.Max(Math.Max(pull.Chatter, roll.Chatter), full.Chatter);
-                Console.WriteLine($"bench {jet,-15} {c.name,-9} hold {hold.RateRms:F2} deg/s | pull q err {100 * pull.QErr:F0}% over {100 * pull.QOver:F0}% | half roll p err {100 * roll.PErr:F0}% beta {roll.BetaMax:F1} | full roll beta {full.BetaMax:F1} |q| {full.QAbsMax:F1} | 90 m/s roll p err {100 * slow.PErr:F0}% | chatter {chatter:F2} (pull {pull.Chatter:F1} roll {roll.Chatter:F1} full {full.Chatter:F1})");
+                Console.WriteLine($"{benchTag}bench {jet,-15} {c.name,-9} hold {hold.RateRms:F2} deg/s | pull q err {100 * pull.QErr:F0}% over {100 * pull.QOver:F0}% | half roll p err {100 * roll.PErr:F0}% beta {roll.BetaMax:F1} | full roll beta {full.BetaMax:F1} |q| {full.QAbsMax:F1} | 90 m/s roll p err {100 * slow.PErr:F0}% | chatter {chatter:F2} (pull {pull.Chatter:F1} roll {roll.Chatter:F1} full {full.Chatter:F1})");
                 Check(slow.PErr < (c.name == "model" ? 0.1f : 0.2f), $"bench {jet} {c.name}: a half-stick roll at 90 m/s follows the command ({100 * slow.PErr:F0}% off)");
                 // pass marks: what the 25 Nov tuning shows, with room. Noise and delay are allowed more surface dither.
                 bool nominal = c.name == "model";
@@ -598,7 +607,9 @@ internal static class SelfCheck
                 float chatterMax = c.noise > 0f ? 8f : c.delay > 0 ? 12f : nominal ? 4f : 7f;
                 Check(hold.RateRms < (nominal ? 0.5f : 2f), $"bench {jet} {c.name}: hands-off holds the rates ({hold.RateRms:F2} deg/s rms)");
                 Check(pull.QErr < (nominal ? 0.06f : 0.12f), $"bench {jet} {c.name}: pitch rate follows the command ({100 * pull.QErr:F0}% off)");
-                Check(pull.QOver < 0.2f, $"bench {jet} {c.name}: no large pitch overshoot ({100 * pull.QOver:F0}%)");
+                // multiplayer mode: 30%. The shared pitch input stops at the canards' stall knee and holds the Revoker's nozzle there too,
+                // so the command catches up late (off model 24-27%; Full mode, whose nozzle goes on alone, 17%)
+                Check(pull.QOver < (benchShared ? 0.3f : 0.2f), $"bench {jet} {c.name}: no large pitch overshoot ({100 * pull.QOver:F0}%)");
                 Check(roll.PErr < (nominal ? 0.03f : 0.06f), $"bench {jet} {c.name}: half-stick roll rate follows the command ({100 * roll.PErr:F0}% off)");
                 Check(full.BetaMax < 9f && full.QAbsMax < 8f, $"bench {jet} {c.name}: a full-stick roll keeps sideslip and pitch in hand (beta {full.BetaMax:F1} deg, |q| {full.QAbsMax:F1} deg/s)");
                 Check(chatter < chatterMax, $"bench {jet} {c.name}: surfaces don't chatter ({chatter:F2} reversals per surface per second)");
@@ -768,10 +779,11 @@ internal static class SelfCheck
                 float aoaOver = c.name == "model" ? 1f : 5f;
                 foreach (var (name, r) in runs)
                 {
-                    Console.WriteLine($"envelope {jet,-15} {c.name,-9} {name,-13} AoA {r.AlphaLo:F1}..{r.AlphaHi:F1} (limits {r.AlphaMin:F1}..{r.AlphaMax:F1}) nz {r.NzLo:F2}..{r.NzHi:F2} (limits {r.NzMin:F1}..{r.NzMax:F1}) beta {r.BetaMax:F1} pred err {r.PredErr:F2} deg");
+                    Console.WriteLine($"{benchTag}envelope {jet,-15} {c.name,-9} {name,-13} AoA {r.AlphaLo:F1}..{r.AlphaHi:F1} (limits {r.AlphaMin:F1}..{r.AlphaMax:F1}) nz {r.NzLo:F2}..{r.NzHi:F2} (limits {r.NzMin:F1}..{r.NzMax:F1}) beta {r.BetaMax:F1} pred err {r.PredErr:F2} deg");
                     Check(r.AlphaHi < r.AlphaMax + aoaOver && r.AlphaLo > r.AlphaMin - aoaOver, $"envelope {jet} {c.name} {name}: AoA inside its limits ({r.AlphaLo:F1}..{r.AlphaHi:F1}, limits {r.AlphaMin:F1}..{r.AlphaMax:F1})");
                     // the coordinated-roll limit: a rolling pull used to build 23.5 deg on the Vortex (allowance 3, overshoot to ~8; off model 12)
-                    Check(r.BetaMax < (c.name == "model" ? 10f : 15f), $"envelope {jet} {c.name} {name}: sideslip held ({r.BetaMax:F1} deg)");
+                    // multiplayer mode off model: 18. The Vortex's V-tail pitches and yaws on the shared channels (rolling pull 15-16 deg)
+                    Check(r.BetaMax < (c.name == "model" ? 10f : benchShared ? 18f : 15f), $"envelope {jet} {c.name} {name}: sideslip held ({r.BetaMax:F1} deg)");
                     Check(r.NzHi < r.NzMax + 0.3f && r.NzLo > r.NzMin - 0.3f, $"envelope {jet} {c.name} {name}: load factor inside its limits ({r.NzLo:F2}..{r.NzHi:F2}, limits {r.NzMin:F1}..{r.NzMax:F1})");
                 }
             }
@@ -792,9 +804,9 @@ internal static class SelfCheck
     /// share of ticks a surface command reverses direction by more than 0.05 deg.
     /// </summary>
     private static BenchResult Fly(string path, float scale, int delay, float noise, float seconds, Func<float, (float p, float r, float y)> stick, float speed = 200f, bool assist = true,
-                                   Func<FbwBench, bool> damage = null, float throttle = 0.5f)
+                                   Func<FbwBench, bool> damage = null, float throttle = 0.5f, bool shared = false)
     {
-        var b = new FbwBench(path) { EffectScale = scale, Delay = delay, Noise = noise, Assist = assist, Throttle = throttle };
+        var b = new FbwBench(path) { EffectScale = scale, Delay = delay, Noise = noise, Assist = assist, Throttle = throttle, Shared = shared || benchShared };
         b.Start(speed);
         // the trim only balances lift and weight: let the FBW settle the start-up pitching moment hands-off first
         for (int k = 0; k < 120; k++) b.Step(0f, 0f, 0f);
@@ -810,7 +822,7 @@ internal static class SelfCheck
         var pred = new float[n];
         double predE = 0;
         int predN = 0;
-        float[] last = new float[b.Slots], lastD = new float[b.Slots];
+        float[] last = new float[b.Fc.Slots], lastD = new float[b.Fc.Slots];
         for (int k = 0; k < n; k++)
         {
             var (sp, sr, sy) = stick(k / 60f);
@@ -840,13 +852,14 @@ internal static class SelfCheck
                 var ix = b.Fc.Indi;
                 trace.WriteLine(string.Join(",", new[] { k, s.P * d, s.Q * d, s.R * d, b.Fc.Law.P * d, b.Fc.Law.Q * d, b.Fc.Law.R * d, s.Beta * d, ix.NuRoll * d, ix.NuPitch * d, ix.NuYaw * d, ix.UnmetRoll * d, ix.UnmetPitch * d, ix.UnmetYaw * d, ix.Alloc.Iterations, s.Alpha * d, s.Nz, b.Fc.Governor.Wanted * d, b.Fc.Governor.Governed * d, b.Fc.Governor.PredAlpha * d, b.Fc.AlphaMax * d, b.Fc.LiftSlope, b.Fc.Governor.WantedRoll * d, b.Fc.Governor.GovernedRoll * d }
                     .Select(v => Convert.ToSingle(v).ToString("G4", System.Globalization.CultureInfo.InvariantCulture))
-                    .Concat(Enumerable.Range(0, b.Slots).Select(j => b.Fc.Command[j].ToString("G4", System.Globalization.CultureInfo.InvariantCulture)))
-                    .Concat(Enumerable.Range(0, b.Slots).Select(j => $"|{b.Fc.Position[j]:F2} [{b.Fc.ReachLo[j]:F2},{b.Fc.ReachHi[j]:F2}] B({ix.Alloc.B[3 * j] * d:F1};{ix.Alloc.B[3 * j + 1] * d:F1};{ix.Alloc.B[3 * j + 2] * d:F1})"))));
+                    .Concat(Enumerable.Range(0, b.Fc.Slots).Select(j => b.Fc.Command[j].ToString("G4", System.Globalization.CultureInfo.InvariantCulture)))
+                    .Concat(Enumerable.Range(0, b.Fc.Slots).Select(j => $"|{b.Fc.Position[j]:F2} [{b.Fc.ReachLo[j]:F2},{b.Fc.ReachHi[j]:F2}] B({ix.Alloc.B[3 * j] * d:F1};{ix.Alloc.B[3 * j + 1] * d:F1};{ix.Alloc.B[3 * j + 2] * d:F1})"))));
             }
-            for (int j = 0; j < b.Surfaces; j++)
+            // multiplayer mode commands the shared inputs (±1): one unit is taken as 30 deg, a typical surface's travel
+            for (int j = 0, nj = b.Shared ? b.Fc.Slots : b.Surfaces; j < nj; j++)
             {
                 // a reversal: a step of over 0.5 deg straight after one the other way (bang-bang trading, not drift)
-                float dj = b.Fc.Command[j] - last[j];
+                float dj = (b.Fc.Command[j] - last[j]) * (b.Shared ? 30f : 1f);
                 if (Math.Abs(dj) > 0.5f && Math.Abs(lastD[j]) > 0.5f && Math.Sign(dj) != Math.Sign(lastD[j])) rev++;
                 lastD[j] = dj;
                 last[j] = b.Fc.Command[j];
@@ -913,11 +926,14 @@ internal static class SelfCheck
                 {
                     BenchResult r = Fly(path, 1f, 0, 0f, m.secs, m.s, h.speed, damage: h.hit, throttle: h.throttle);
                     BenchResult? w = h.without != null ? Fly(path, 1f, 0, 0f, m.secs, m.s, h.speed, damage: h.without, throttle: h.throttle) : (BenchResult?)null;
-                    Console.WriteLine($"damage {jet,-15} {h.name,-16} {m.name,-9} beta {r.BetaMax,4:F1}{(w.HasValue ? $" (no cut {w.Value.BetaMax:F1})" : "")} AoA {r.AlphaLo:F1}..{r.AlphaHi:F1} (limits {r.AlphaMin:F1}..{r.AlphaMax:F1}) nz {r.NzLo:F2}..{r.NzHi:F2} | roll rate, last 1 s {r.RollEnd:F1} deg/s | throttle cut max {r.CutMax:F2} end {r.CutEnd:F2}");
+                    Console.WriteLine($"{benchTag}damage {jet,-15} {h.name,-16} {m.name,-9} beta {r.BetaMax,4:F1}{(w.HasValue ? $" (no cut {w.Value.BetaMax:F1})" : "")} AoA {r.AlphaLo:F1}..{r.AlphaHi:F1} (limits {r.AlphaMin:F1}..{r.AlphaMax:F1}) nz {r.NzLo:F2}..{r.NzHi:F2} | roll rate, last 1 s {r.RollEnd:F1} deg/s | throttle cut max {r.CutMax:F2} end {r.CutEnd:F2}");
                     string what = $"damage {jet} {h.name} {m.name}";
-                    Check(r.BetaMax < 10f, $"{what}: sideslip held ({r.BetaMax:F1} deg)");
                     Check(r.AlphaHi < r.AlphaMax + 5f && r.AlphaLo > r.AlphaMin - 5f, $"{what}: AoA inside its limits ({r.AlphaLo:F1}..{r.AlphaHi:F1})");
                     Check(r.NzHi < r.NzMax + 0.5f && r.NzLo > r.NzMin - 0.5f, $"{what}: load factor inside its limits ({r.NzLo:F2}..{r.NzHi:F2})");
+                    // Multiplayer mode is only reported past AoA and g: one shared roll input can't work around a lost aileron (the roll
+                    // rings out over 2 s), and one throttle can't spare a nozzle's authority while it cuts (docs/fbw/PLAN.md, phase 6)
+                    if (benchShared) continue;
+                    Check(r.BetaMax < 10f, $"{what}: sideslip held ({r.BetaMax:F1} deg)");
                     // 5 deg/s: the Ifrit at 65 m/s with full thrust on one engine sits at the edge of its roll capacity, and its bank drifts at 3.5
                     if (!m.name.Contains("pull")) Check(r.RollEnd < 5f, $"{what}: the roll stops hands-off ({r.RollEnd:F1} deg/s rms over the last second)");
                     if (w.HasValue) Check(r.BetaMax < w.Value.BetaMax + 0.5f, $"{what}: the throttle cut never adds sideslip ({r.BetaMax:F1} deg, {w.Value.BetaMax:F1} without)");
@@ -977,6 +993,29 @@ internal static class SelfCheck
         Check(Near(inp[0] * range[0] + inp[1] * range[1], 45f), "channels: target clamped to the total travel");
         AutopilotMod.Fbw.Control.ChannelMix.Reach(range, new float[] { 0f, 9.5f, 0f }, 70f, 1f / 60f, out float lo, out float hi);
         Check(Near(hi, 9.5f + 1.1667f + 0.5f, 1e-3f) && Near(lo, 9.5f - 2f * 1.1667f, 1e-3f), $"channels: one tick's reach ({lo:F3} .. {hi:F3})");
+
+        // multiplayer mode's stall limit: the input stops where under half its effect stays attached, and never drags back
+        {
+            var mix = new AutopilotMod.Fbw.Control.SharedMix(2);
+            var fc = new AutopilotMod.Fbw.Control.FlightComputer(3);
+            float[] r10 = { 10f, 0f, 0f };
+            float UsableHi(float u, float strongStalls)
+            {
+                mix.Begin(u, 0f, 0f);
+                mix.Surface(new V3(0f, 0.06f, 0f), r10, 60f, -10f, strongStalls, 1f / 60f); // 60% of the pitch, attached up to 3 deg (or 10)
+                mix.Surface(new V3(0f, 0.04f, 0f), r10, 60f, -10f, 10f, 1f / 60f);
+                mix.Fill(fc);
+                return fc.UsableHi[0];
+            }
+            Check(Near(UsableHi(0f, 3f), 0.3f), $"shared mix: the input stops where most of its effect stalls ({UsableHi(0f, 3f):F2})");
+            Check(Near(fc.Indi.Alloc.B[1], 1f), $"shared mix: the input's effect is each surface's per degree times its range ({fc.Indi.Alloc.B[1]:F2})");
+            Check(Near(UsableHi(0.5f, 3f), 0.5f), "shared mix: a stalled majority holds the input, never drags it back");
+            mix.Begin(0f, 0f, 0f);
+            mix.Surface(new V3(0f, 0.04f, 0f), r10, 60f, -10f, 3f, 1f / 60f); // now the weaker one stalls
+            mix.Surface(new V3(0f, 0.06f, 0f), r10, 60f, -10f, 10f, 1f / 60f);
+            mix.Fill(fc);
+            Check(Near(fc.UsableHi[0], 1f), $"shared mix: a stalled minority doesn't stop the input ({fc.UsableHi[0]:F2})");
+        }
 
         // nozzle inputs: the game maps angle = -clamp(input * gain, +-1) * vectoring
         float pin = AutopilotMod.Fbw.Control.ChannelMix.NozzlePitchInput(10f, 15f, 2f);

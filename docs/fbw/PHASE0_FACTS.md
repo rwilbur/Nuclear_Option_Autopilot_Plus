@@ -172,6 +172,12 @@ have them.
   - **Per-surface mode:** they see an approximation.
   - **Shared-input ("multiplayer") mode:** the FCS writes only the shared `ControlInputs`, and every surface
     and nozzle moves by stock mixing. They see exactly what is flying, as with the stock FBW.
+- **Who writes the shared inputs, and when** (for the shared-input mode):
+  - `PlayerAxisControls` sets pitch, roll and yaw outright every tick, before `FilterInputs`. It never reads them back.
+    The exceptions are a detached cockpit, where it writes nothing, and a pilot too weak (`pilotStrength` < 0.2), where it
+    writes zeros.
+  - The throttle lever (`PlayerThrottleAxis1Controls`) writes the throttle outright from its own lever state, in Update
+    (and in FixedUpdate during auto-hover). A tick with no Update between leaves it untouched.
 
 ## 8. Data to collect per jet
 
