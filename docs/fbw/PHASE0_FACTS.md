@@ -104,6 +104,8 @@ Every part is a plate. Per tick:
 - Torque = F × (−R·centerOfLift) about the part's rigidbody; force applied to the part's own rigidbody.
 - Air density from a chart by altitude. Underwater/splash terms.
 - No Mach effect on C_L, no downwash, no blanking. A deflected surface only changes its own plate.
+- **Damage** (`AeroPart.ApplyDamage`): `wingEffectiveness` = lerp(0.5, 1, hitPoints / 100), so a wrecked part still gives half
+  its lift. A detached part gets 0 and leaves the aircraft.
 
 So **the effector model can be the game's own equation, exactly**: a surface's moment at any deflection is
 this plate evaluated with its lift frame rotated by that deflection. Airfoil charts come from
@@ -117,6 +119,13 @@ this plate evaluated with its lift frame rotated by that deflection. Airfoil cha
 - nozzle pitch target = −clamp(pitch × gain.x, ±1) × vectoring.x − clamp(roll × gain.z, ±1) × vectoring.z;
   yaw target = −clamp(yaw, ±1) × vectoring.y (0 below 3 m radar altitude);
 - slew 70°/s per axis; all zero above `thrustVectoringMaxAirspeed`; the pitch angle is clamped ±20°.
+
+**Damage and failure** (`Turbojet`, phase 5):
+- Hits on the engine's `criticalParts` lower `condition`, which scales the rpm it can reach above idle by (0.5 + 0.5 × condition).
+- Once `condition` reaches 0, the part detaches or the engine goes under water, the engine is inoperable. With no ignition, too
+  thin air or no fuel it makes no thrust either. In all those cases `thrustRatio` is 0 at once, not spooled down.
+- The afterburners (`JetNozzle.Thrust`) run on the engine's own `controlInputs.throttle` once rpm is over 85%, so a throttle cut
+  takes the afterburner thrust off at once and the core thrust as the rpm spools.
 
 **Clean per-engine command:** the same reference swap as the surfaces. A per-engine `ControlInputs` gives
 that engine's nozzle angles and throttle (the engine-out throttle cut) without a transpiler. `DuctedFan`,

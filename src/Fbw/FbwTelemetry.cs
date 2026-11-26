@@ -34,7 +34,7 @@ namespace AutopilotMod.Fbw
             sb.Append(",aeroErrF,aeroErrM,aeroWorst,aeroSkip,pdotPred,qdotPred,rdotPred,pdotProbe,qdotProbe,rdotProbe");
             sb.Append(",mOtherL,mOtherM,mOtherN,mThrustL,mThrustM,mThrustN,cgX,cgY,cgZ");
             sb.Append(",flying,pCmd,qCmd,rCmd,nuP,nuQ,nuR,unmetP,unmetQ,unmetR");
-            sb.Append(",assist,alphaMax,alphaMin,liftSlope,pitchStiff,couplingK,qWant,qGov,psWant,psGov,predAlpha,predNz,override,nzLimit,rollLo,rollHi,rollAccLo,rollAccHi");
+            sb.Append(",assist,alphaMax,alphaMin,liftSlope,pitchStiff,couplingK,qWant,qGov,psWant,psGov,predAlpha,predNz,override,nzLimit,rollLo,rollHi,rollAccLo,rollAccHi,thrustCut,cutAllowed");
             foreach (SurfaceLink s in link.Surfaces) sb.Append(',').Append(s.Name).Append("_tgt,").Append(s.Name).Append("_ang,").Append(s.Name).Append("_split");
             for (int i = 0; i < link.Engines.Count; i++) sb.Append(",e").Append(i).Append("_nzx,e").Append(i).Append("_nzy,e").Append(i).Append("_thrust,e").Append(i).Append("_thr");
             w.WriteLine(sb.ToString());
@@ -82,8 +82,9 @@ namespace AutopilotMod.Fbw
                 N(gov.PredAlpha * D); N(gov.PredNz);
                 sb.Append(flight.LimitOverride ? ",1" : ",0");
                 N(fc.Law.NzLimit); N(fc.RollLo * D); N(fc.RollHi * D); N(fc.RollAccelLo * D); N(fc.RollAccelHi * D);
+                N(fc.Cut.Cut); N(fc.Cut.Allowed * D);
             }
-            else sb.Append(",0,,,,,,,,,,,,,,,,,,,,,,,,,,,");
+            else sb.Append(",0,,,,,,,,,,,,,,,,,,,,,,,,,,,,,");
             foreach (SurfaceLink sf in link.Surfaces)
             {
                 if (sf.JobReady) { N(sf.Target); N(sf.Angle); N(sf.Split); }

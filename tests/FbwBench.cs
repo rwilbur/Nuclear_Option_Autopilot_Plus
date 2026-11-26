@@ -11,9 +11,12 @@ using AutopilotMod.Fbw.Model;
 /// Offline bench for the fly-by-wire: one jet from its export (tests/airframes) as a rigid body, every part
 /// a game plate (Model.Plate), surfaces on the game's per-channel servos, vectoring nozzles; flown by the
 /// same FlightComputer the game runs. Simplified on purpose: rigid (no joints), still air, constant
-/// density, and a speed-hold force at the CG in place of the engines' thrust (the vectoring nozzles still
-/// push, at half their maximum thrust). The plant can be made deliberately different from the model the
-/// controller uses: surface/nozzle effect scaled, extra ticks of delay, noise on the measured acceleration.
+/// density, and a speed-hold force at the CG that cancels everything along the flight path (so thrust only
+/// matters through its moment: every engine with a nozzle pushes at <see cref="Throttle"/> of its maximum,
+/// spooling as the game's, and the vectoring ones swivel). The plant can be made deliberately different from
+/// the model the controller uses: surface/nozzle effect scaled, extra ticks of delay, noise on the measured
+/// acceleration. Damage (phase 5): parts shot off (plate, mass and surface gone), parts at reduced wing
+/// effectiveness (as the game's hit points do), stores hung anywhere, engines killed.
 /// </summary>
 internal sealed class FbwBench
 {
@@ -21,6 +24,7 @@ internal sealed class FbwBench
 
     private sealed class Part
     {
+        public string Name;
         public V3 Com, ChannelFwd, Col;
         public Q4 Lift0;
         public float Area, DragArea, Eff, Channeling;
@@ -39,26 +43,43 @@ internal sealed class FbwBench
         public bool PitchRole => Range[0] != 0f; // stock pitches with it (FbwFlight: no pitch use otherwise)
         // split (drag) surface: force = -split x SplitDrag x rho |v| v on the part
         public float MaxSplit, SplitDrag, YawSplitFactor, Split;
+        public bool Lost;
         public bool Splits => MaxSplit > 0f && SplitDrag > 0f && YawSplitFactor != 0f && Range[2] == 0f;
     }
 
     private sealed class Nozzle
     {
+        public string Name;
         public V3 Pos, Fwd0, PitchAxis, YawAxis;
-        public float VecX, VecY, MaxV, Thrust, Ax, Ay, CmdX, CmdY;
+        public float VecX, VecY, MaxV, MaxThrust, Ratio, Spool, Ax, Ay, CmdX, CmdY;
+        public bool Dead;
+        public float Thrust => Dead ? 0f : MaxThrust * Ratio;
+    }
+
+    private sealed class MassBody
+    {
+        public string Name;
+        public float Mass;
+        public V3 Com, Inertia;
+        public Q4 Rot;
     }
 
     public readonly string Unit;
     private readonly List<Part> parts = new List<Part>();
     private readonly List<Surface> surfaces = new List<Surface>();
     private readonly List<Surface> splits = new List<Surface>(); // slots after the surfaces, before the nozzles
-    private readonly List<Nozzle> nozzles = new List<Nozzle>();
+    private readonly List<Nozzle> nozzles = new List<Nozzle>(); // vectoring engines: two slots each
+    private readonly List<Nozzle> engines = new List<Nozzle>(); // every engine with a nozzle, vectoring or not
+    private readonly List<MassBody> bodyList = new List<MassBody>();
     private readonly MassProps mass = new MassProps(); // body frame, about the CG
     private readonly float[] lift, drag;
     private readonly FoilPeaks peaks;
     public readonly float GLimit, QMax, PMax, StockAlphaLimit;
     public readonly LiftCurve Curve;
     public bool Assist = true; // Stability Assist
+
+    /// <summary>The pilot's throttle, as each engine's thrust ratio (set before <see cref="Start"/>).</summary>
+    public float Throttle = 0.5f;
 
     // plant state (world translation, body rotation)
     private V3 vel, omega; // omega in body axes (Unity)
@@ -84,10 +105,11 @@ internal sealed class FbwBench
         foreach (Dictionary<string, object> b in L(d["bodies"]))
         {
             V3 com = Vec(b["com"]);
-            mass.Add((float)(double)b["mass"], com, Vec(b["inertia"]), Quat(b["inertiaRotation"]));
-            bodies[(bool)b["isRoot"] ? "" : (string)b["name"]] = com;
+            string name = (bool)b["isRoot"] ? "" : (string)b["name"];
+            bodyList.Add(new MassBody { Name = name, Mass = (float)(double)b["mass"], Com = com, Inertia = Vec(b["inertia"]), Rot = Quat(b["inertiaRotation"]) });
+            bodies[name] = com;
         }
-        mass.Finish();
+        Remass();
 
         var foils = L(d["airfoils"]).Cast<Dictionary<string, object>>().ToList();
         lift = new float[Math.Max(1, foils.Count) * Plate.ChartPoints];
@@ -117,6 +139,7 @@ internal sealed class FbwBench
                 ChannelFwd = Vec(((Dictionary<string, object>)a["pose"])["forward"]),
                 Area = F(a, "wingArea"), DragArea = F(a, "dragArea"), Eff = F(a, "wingEffectiveness"),
                 Channeling = F(a, "airflowChanneling"), Foil = (int)F(a, "airfoil"), Col = V(Field(a, "centerOfLift")),
+                Name = ((string)a["path"]).Split('/').Last(),
             };
             parts.Add(p);
             byPath[(string)a["path"]] = p;
@@ -162,16 +185,22 @@ internal sealed class FbwBench
         foreach (Dictionary<string, object> e in L(d["engines"]))
         {
             var t = (Dictionary<string, object>)e["transforms"];
-            V3 tv = V(Field(e, "thrustVectoring") ?? "(0,0,0)"), gain = V(Field(e, "thrustVectoringGain") ?? "(1,1,1)");
-            if ((tv.X == 0f && tv.Y == 0f) || !t.ContainsKey("nozzles[0]") || !t.ContainsKey("vectoringTransforms[0]")) continue;
+            V3 tv = V(Field(e, "thrustVectoring") ?? "(0,0,0)");
+            if (!t.ContainsKey("nozzles[0]")) continue;
             var n = (Dictionary<string, object>)t["nozzles[0]"];
-            var vt = (Dictionary<string, object>)t["vectoringTransforms[0]"];
-            nozzles.Add(new Nozzle
+            bool vectors = (tv.X != 0f || tv.Y != 0f) && t.ContainsKey("vectoringTransforms[0]");
+            var vt = vectors ? (Dictionary<string, object>)t["vectoringTransforms[0]"] : n;
+            float rpmSpan = F(e, "maxRPM") - F(e, "minRPM");
+            var nz = new Nozzle
             {
+                Name = (string)e["path"],
                 Pos = Vec(n["position"]), Fwd0 = Vec(n["forward"]), PitchAxis = Vec(vt["right"]), YawAxis = Vec(vt["up"]),
-                VecX = tv.X, VecY = tv.Y, MaxV = F(e, "thrustVectoringMaxAirspeed"),
-                Thrust = 0.5f * (Field(e, "maxThrust") != null ? F(e, "maxThrust") : 60000f),
-            });
+                VecX = vectors ? tv.X : 0f, VecY = vectors ? tv.Y : 0f, MaxV = F(e, "thrustVectoringMaxAirspeed"),
+                MaxThrust = Field(e, "maxThrust") != null ? F(e, "maxThrust") : 60000f,
+                Spool = rpmSpan > 0f && F(e, "spoolRate") > 0f ? F(e, "spoolRate") / rpmSpan : 0.35f, // thrust ratio per second, about
+            };
+            engines.Add(nz);
+            if (vectors) nozzles.Add(nz);
         }
 
         peaks = new FoilPeaks(lift);
@@ -192,6 +221,50 @@ internal sealed class FbwBench
 
     public int Surfaces => surfaces.Count;
     public int Nozzles => nozzles.Count;
+    public int Engines => engines.Count;
+
+    /// <summary>Engine <paramref name="k"/>'s path in the export (e.g. engine_L).</summary>
+    public string EngineName(int k) => engines[k].Name;
+
+    /// <summary>Engine <paramref name="k"/>'s thrust ratio now.</summary>
+    public float EngineRatio(int k) => engines[k].Dead ? 0f : engines[k].Ratio;
+
+    // ---- damage (phase 5) ----
+
+    /// <summary>Shoot off every part named <paramref name="name"/>: its plate, its body's mass and its surface (that slot sits out). False if none.</summary>
+    public bool Lose(string name)
+    {
+        int n = parts.RemoveAll(p => p.Name == name);
+        foreach (Surface sf in surfaces) if (sf.Part.Name == name) sf.Lost = true;
+        if (bodyList.RemoveAll(b => b.Name == name) > 0) Remass();
+        return n > 0;
+    }
+
+    /// <summary>Every part whose name passes <paramref name="which"/> at <paramref name="eff"/> of its wing effectiveness (the game: 0.5 at no hit points). The count.</summary>
+    public int Weaken(Func<string, bool> which, float eff)
+    {
+        int n = 0;
+        foreach (Part p in parts) if (which(p.Name)) { p.Eff *= eff; n++; }
+        return n;
+    }
+
+    /// <summary>A store of <paramref name="kg"/> at <paramref name="offset"/> from the CG (body axes, m; −x is left).</summary>
+    public void Store(V3 offset, float kg)
+    {
+        float i = 0.1f * kg; // a compact store, roughly a 0.5 m ball
+        bodyList.Add(new MassBody { Name = "store", Mass = kg, Com = mass.Cg + offset, Inertia = new V3(i, i, i), Rot = Q4.Identity });
+        Remass();
+    }
+
+    /// <summary>Engine <paramref name="k"/> stops: its thrust goes to nothing at once (the game's thrust ratio is 0 once inoperable).</summary>
+    public void KillEngine(int k) => engines[k].Dead = true;
+
+    private void Remass()
+    {
+        mass.Clear();
+        foreach (MassBody b in bodyList) mass.Add(b.Mass, b.Com, b.Inertia, b.Rot);
+        mass.Finish();
+    }
     private int NozzleBase => surfaces.Count + splits.Count;
     public int Slots => NozzleBase + 2 * nozzles.Count;
 
@@ -207,7 +280,7 @@ internal sealed class FbwBench
             if (V3.Dot(f, new V3(0f, 1f, 0f)) < mass.Mass * G) lo = a; else hi = a;
         }
         SetFlight(speed, 0.5f * (lo + hi));
-        Fc = new FlightComputer(Slots);
+        Fc = new FlightComputer(Slots, engines.Count);
         Fc.Law.PMax = PMax;
         Fc.Law.QMax = QMax;
         Fc.Law.NzMax = GLimit;
@@ -244,7 +317,7 @@ internal sealed class FbwBench
         vel = new V3(0f, 0f, speed);
         omega = V3.Zero;
         foreach (Surface s in surfaces) { Array.Clear(s.Cur, 0, 3); s.Split = 0f; }
-        foreach (Nozzle n in nozzles) n.Ax = n.Ay = n.CmdX = n.CmdY = 0f;
+        foreach (Nozzle n in engines) { n.Ax = n.Ay = n.CmdX = n.CmdY = 0f; n.Ratio = Throttle; }
     }
 
     public FlightState State()
@@ -291,6 +364,11 @@ internal sealed class FbwBench
         for (int j = 0; j < surfaces.Count; j++)
         {
             Surface sf = surfaces[j];
+            if (sf.Lost)
+            {
+                Fc.Disable(j, 0f);
+                continue;
+            }
             Fc.Position[j] = sf.Angle;
             ChannelMix.Reach(sf.Range, sf.Cur, sf.Servo, Dt * FlightComputer.ReachTicks, out float rLo, out float rHi);
             Plate.Input input = Input(sf.Part, vb, sf.Angle);
@@ -305,6 +383,11 @@ internal sealed class FbwBench
         {
             Surface sf = splits[k];
             int j = surfaces.Count + k;
+            if (sf.Lost)
+            {
+                Fc.Disable(j, 0f);
+                continue;
+            }
             V3 v = vb + V3.Cross(omega, sf.Part.Com - cg);
             Fc.Position[j] = sf.Split;
             float step = sf.Servo * Dt * FlightComputer.ReachTicks;
@@ -335,6 +418,15 @@ internal sealed class FbwBench
                 Fc.CostScale[jy] = 10f;
             }
             else Fc.Disable(jy, n.Ay);
+        }
+        // each engine's thrust yaw in stability axes (what the adapter reads from the live nozzles)
+        float ca = (float)Math.Cos(s.Alpha), sa = (float)Math.Sin(s.Alpha);
+        for (int k = 0; k < engines.Count; k++)
+        {
+            Nozzle n = engines[k];
+            // along the body axis, not the nozzle: a swivelled nozzle's yaw is the allocator's, not an asymmetry
+            V3 acc = Body(MassProps.Solve(mass.Inertia, V3.Cross(n.Pos - cg, new V3(0f, 0f, n.Thrust))));
+            Fc.Cut.Yaw[k] = acc.Z * ca - acc.X * sa;
         }
     }
 
@@ -368,6 +460,12 @@ internal sealed class FbwBench
             n.Ax += Clamp(px - n.Ax, -70f * Dt, 70f * Dt);
             n.Ay += Clamp(py - n.Ay, -70f * Dt, 70f * Dt);
             if (vel.Magnitude > n.MaxV) n.Ax = n.Ay = 0f;
+        }
+        // throttles: the pilot's times the FBW's engine-out cut; thrust spools toward it, as the game's rpm does
+        for (int k = 0; k < engines.Count; k++)
+        {
+            Nozzle n = engines[k];
+            n.Ratio += Clamp(Throttle * Fc.Cut.Scale[k] - n.Ratio, -n.Spool * Dt, n.Spool * Dt);
         }
     }
 
@@ -406,12 +504,13 @@ internal sealed class FbwBench
         }
         foreach (Surface sf in splits)
         {
+            if (sf.Lost) continue;
             V3 v = vb + V3.Cross(omega, sf.Part.Com - cg);
             V3 f = v * (-sf.Split * EffectScale * sf.SplitDrag * Rho * v.Magnitude);
             force += f;
             moment += V3.Cross(sf.Part.Com - cg, f);
         }
-        foreach (Nozzle n in nozzles)
+        foreach (Nozzle n in engines)
         {
             V3 f = NozzleForward(n, n.Ax * EffectScale, n.Ay * EffectScale) * n.Thrust;
             force += f;

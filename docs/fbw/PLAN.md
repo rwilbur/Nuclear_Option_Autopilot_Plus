@@ -145,7 +145,7 @@ Choices, and the evidence for them:
 | 2 | Effector models checked in game | ✅ See "Phase 2 findings" below (Compass, Revoker, Ifrit, Medusa, Vagrant flights, 25 Nov 2026) |
 | 3 | INDI + allocator, plain rate laws, Full mode | ✅ Bench passes on the Revoker, Compass, Vortex and Ifrit; flown on the Compass, Vortex, Ifrit and Revoker (25 Nov 2026), Ifrit retest "much better" after splits became yaw effectors |
 | 4 | Laws + envelope governor | Bench ✅ (25 Nov 2026): full-stick pulls (200 and 110 m/s), rolling pulls, releases and pushes stay inside AoA and g on four jets, on and off model (see "Phase 4 findings"). In-game check pending |
-| 5 | Capacity limits: damage, stores, engine-out (throttle cut), ground steering | Bench damage cases fly without departure |
+| 5 | Capacity limits: damage, stores, engine-out (throttle cut), ground steering | Bench ✅ (25 Nov 2026): parts shot off, wings at half effectiveness, a 1 t off-centre store and engine-out fly without departure on four jets (see "Phase 5 findings"). Ground steering not started. In-game check pending |
 | 6 | Multiplayer mode | Remote view matches (by construction); same laws pass the HQ checks |
 | 7 | Performance: timings, then threading / native if justified | Per-tick cost measured in game, with and without |
 | 8 | Autopilot integration: the A/P commands rates and g directly | A/P tests pass; stock FBW copies removed from the A/P |
@@ -260,6 +260,36 @@ Choices, and the evidence for them:
   knee: the first chart segment with under 25% of the lift slope at zero (17 deg there, 15 for the built-in curve).
   Bench release from a rolling pull: Vortex 101 -> 26 deg after release, Revoker 144 -> 96, Ifrit 63 -> 49. The cost:
   Vortex rolling pull at 150 m/s, 118 -> 85 deg/s.
+
+### Phase 5 findings (bench, 25 Nov 2026)
+
+- **Damage needs no code of its own.** The game already shows it in what the FBW reads: a hit part's wing effectiveness drops to
+  between 0.5 and 1 with its hit points, a part shot off goes to 0 and leaves (its surface's job reports it detached, its mass
+  leaves the mass properties), and the lift curve is swept from the live parts. The bench now does the same: `FbwBench.Lose`,
+  `Weaken`, `Store`, `KillEngine`.
+- **Cases** (`CheckFbwDamage`, on the Revoker, Compass, Vortex and Ifrit): the left aileron, wingtip or tailplane/canard shot
+  off, the left wing at half effectiveness, 1 t hung 3 m out on the left wing, and the left engine dead with the right at full
+  thrust (65, 80, 120, 250 m/s). Each hits a settled jet, which then holds hands-off, rolls both ways, pulls and rolling-pulls.
+  All hold: sideslip under 10 deg, AoA and g inside their limits, and the roll stops after release.
+- **Engine-out throttle cut** (`ThrustCut`). Each jet engine's thrust yaw (along the body axis, so a swivelled nozzle's own yaw
+  doesn't count as asymmetry) is weighed against the steady yaw authority. That authority is an exact LP over the effectors' usable
+  ranges from neutral: the most stability yaw with the pitch they trim with now and 30% of the roll authority kept both ways, less a
+  30% yaw reserve, filtered over 2 s.
+  - Roll has to be part of the measure. At high AoA part of the stability yaw comes from the roll surfaces. On yaw alone the
+    Ifrit at 65 m/s held its sideslip at 0.5 deg with the left engine dead, but it could not stop a roll-off toward that engine.
+  - The 2 s filter keeps a pull's brief loss of yaw (the ruddervators busy pitching) from cutting the throttle. An asymmetry under
+    10% of the plain yaw authority is never cut. Without that, a centreline engine's trace of yaw got the single-engine jets cut
+    in pulls.
+  - The cut aims at the steady state (thrust spools at about 0.35 thrust ratio per second). It cuts at 2/s and gives the thrust
+    back at 0.25/s as the authority grows. The limit override turns it off.
+  - Compass, 65 m/s, rolling into the dead engine: sideslip 16 -> 7 deg. Rolling pull: 12.6 -> 7.9. It settles at about a 45%
+    cut, 15% at 80 m/s, none from 120 m/s in steady flight. A sustained rolling pull at 120 m/s still cuts the Ifrit by up to
+    38%, which is right: its yaw does run short there.
+  - Known corner: the Ifrit at 65 m/s with full thrust on one engine sits at the edge of its roll capacity. Hands-off, its bank
+    drifts about 16 deg in 4 s (34 deg and still rolling without the cut). The stick still stops it.
+- In the bench the speed is held, so it cannot show what the cut costs in speed.
+- **Ground steering** is not started. Full mode hands back to stock below 60 m/s and 5 m, so the nose wheel and brakes stay
+  on the shared (stock) inputs. Doing more needs a ground model in the bench.
 
 Bench: a rigid-body simulator built on the effector models and each jet's export. It adds deliberate model
 error, delay, servo lag and part flex, because a plant that matches the model exactly makes everything look

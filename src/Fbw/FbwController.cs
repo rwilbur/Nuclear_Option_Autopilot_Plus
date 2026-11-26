@@ -53,6 +53,7 @@ namespace AutopilotMod.Fbw
         private AircraftLink link;
         private FbwFlight flight;        // Full mode's computer for the held aircraft
         private bool flying;             // Full mode is flying the jet now
+        private bool cutting;            // the engine-out throttle cut is on (for the log)
         private ControlsFilter.FlyByWire stockFbw;
         private bool stockWasEnabled;
         private FbwTelemetry tlm;
@@ -106,6 +107,12 @@ namespace AutopilotMod.Fbw
                     flight.OverrideG = cfg.OverrideG.Value;
                     flight.SlipAllowance = cfg.RollSideslip.Value / AirData.Rad2Deg;
                     flight.Tick(state, dt);
+                    float cut = flight.Computer.Cut.Cut;
+                    if (cut > 0.05f != cutting)
+                    {
+                        cutting = !cutting;
+                        log.LogInfo(cutting ? $"FBW: engine-out throttle cut ({cut:P0}): the yaw can't hold the thrust asymmetry" : "FBW: engine-out throttle cut given back");
+                    }
                 }
                 else if (mode.Value != FbwMode.Off)
                 {
@@ -199,6 +206,7 @@ namespace AutopilotMod.Fbw
         private void StopFlying(string why)
         {
             flying = false;
+            cutting = false;
             if (stockFbw != null) stockFbw.Enabled = stockWasEnabled;
             stockFbw = null;
             log.LogInfo("FBW: stock fly-by-wire back (" + why + ")");

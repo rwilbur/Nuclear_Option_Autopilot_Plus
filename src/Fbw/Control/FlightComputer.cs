@@ -73,9 +73,13 @@ namespace AutopilotMod.Fbw.Control
         public readonly float[] Position, ReachLo, ReachHi, Neutral, CostScale;
         public readonly float[] UsableLo, UsableHi; // the whole range the slot may use (travel, attached flow), set with its box
 
-        public FlightComputer(int slots)
+        /// <summary>Engine-out yaw: per-engine throttle scales (<see cref="ThrustCut"/>); the caller fills its Yaw each tick.</summary>
+        public readonly ThrustCut Cut;
+
+        public FlightComputer(int slots, int engines = 0)
         {
             Slots = slots;
+            Cut = new ThrustCut(engines);
             Indi = new IndiLoop(slots);
             Position = new float[slots];
             ReachLo = new float[slots];
@@ -184,12 +188,43 @@ namespace AutopilotMod.Fbw.Control
             psT += free * (psFree - psT); // within the sideslip allowance the stick's roll, fading to the coordinated one
             RateLaw.Body(psT, rYaw, s.Alpha, out float pT, out float rT);
             Law.Filter(pT, qT, rT, dt);
+            if (Cut.Yaw.Length > 0 && Cut.Needs(PlainYaw(s.Alpha, false), PlainYaw(s.Alpha, true)))
+            {
+                // The steady yaw authority (B still in body axes here): the stability yaw the effectors give from neutral, at the pitch they
+                // trim with now, while keeping a reserve of roll both ways. Yaw alone isn't enough: at high AoA part of the stability yaw
+                // comes from the roll surfaces, and holding a dead engine's yaw with them starved the roll (Ifrit, 65 m/s, bench: a roll-off
+                // the stick couldn't stop, with 0.5 deg of sideslip).
+                float ca = (float)Math.Cos(s.Alpha), sa = (float)Math.Sin(s.Alpha), trim = 0f;
+                for (int j = 0; j < Slots; j++) trim += Indi.Alloc.B[3 * j + 1] * (Position[j] - Neutral[j]);
+                float lo = 0f, hi = 0f;
+                if (LineRange(new V3(1f, 0f, 0f), new V3(0f, trim, 0f), ca, sa, Neutral, out float rLo, out float rHi)
+                    && LineRange(new V3(0f, 0f, 1f), new V3(ThrustCut.Reserve * Math.Max(0f, rHi), trim, 0f), ca, sa, Neutral, out float lo1, out float hi1)
+                    && LineRange(new V3(0f, 0f, 1f), new V3(ThrustCut.Reserve * Math.Min(0f, rLo), trim, 0f), ca, sa, Neutral, out float lo2, out float hi2))
+                {
+                    lo = Math.Min(0f, Math.Max(lo1, lo2));
+                    hi = Math.Max(0f, Math.Min(hi1, hi2));
+                }
+                Cut.Update(lo, hi, dt);
+            }
             Indi.Step(Slots, s.P, s.Q, s.R, s.PDot, s.QDot, s.RDot, s.Alpha, Law, Position, ReachLo, ReachHi, Neutral, CostScale, dt);
             // What the effectors couldn't give this tick, as acceleration (the INDI asked for IncrementGain of the gap),
             // comes off every axis's command. (Bench: hedging roll alone left the Ifrit 8 deg of sideslip in a full roll,
             // all three 4.7.)
             float g = 1f / Indi.IncrementGain;
             Law.Hedge(Indi.UnmetRoll * g, Indi.UnmetPitch * g, Indi.UnmetYaw * g, s.P, s.Q, s.R, s.Alpha, dt);
+        }
+
+        // the stability yaw the effectors give at one end of their usable ranges, from neutral, each on its own (B in body axes)
+        private float PlainYaw(float alpha, bool up)
+        {
+            float ca = (float)Math.Cos(alpha), sa = (float)Math.Sin(alpha), sum = 0f;
+            float[] b = Indi.Alloc.B;
+            for (int j = 0; j < Slots; j++)
+            {
+                float by = b[3 * j + 2] * ca - b[3 * j] * sa, t1 = by * (UsableHi[j] - Neutral[j]), t2 = by * (UsableLo[j] - Neutral[j]);
+                sum += up ? Math.Max(0f, Math.Max(t1, t2)) : Math.Min(0f, Math.Min(t1, t2));
+            }
+            return sum;
         }
 
         private float[] lpA, lpB, lpQ, lpObj, lpLo, lpHi, lpKey, lpX;
@@ -208,7 +243,7 @@ namespace AutopilotMod.Fbw.Control
             float ps = s.P * ca + s.R * sa, psDot = Indi.FilteredPDot * ca + Indi.FilteredRDot * sa;
             // steady: the roll rates the yaw (and pitch) can hold
             V3 c = -new V3(psDot, Indi.FilteredQDot, Indi.FilteredRDot * ca - Indi.FilteredPDot * sa);
-            if (LineRange(-new V3(RollAccel.X * ca + RollAccel.Z * sa, RollAccel.Y, RollAccel.Z * ca - RollAccel.X * sa), c, ca, sa, out float lo, out float hi))
+            if (LineRange(-new V3(RollAccel.X * ca + RollAccel.Z * sa, RollAccel.Y, RollAccel.Z * ca - RollAccel.X * sa), c, ca, sa, Position, out float lo, out float hi))
             {
                 RollLo = ps + lo;
                 RollHi = ps + hi;
@@ -222,7 +257,7 @@ namespace AutopilotMod.Fbw.Control
             // (a roll that outruns the yaw's servos leaves sideslip behind: Vortex V-tail, bench 25 Nov)
             // Over the usable travel, not this tick's servo reach: a one-tick limit starved the roll (the INDI asks little of a held-back
             // command, so the surfaces barely move and the limit stays small; bench 25 Nov, rolling pulls at 90 m/s rolled 1 deg/s).
-            LineRange(new V3(1f, 0f, 0f), new V3(0f, Indi.GotPitch, Indi.RequestYaw), ca, sa, out lo, out hi);
+            LineRange(new V3(1f, 0f, 0f), new V3(0f, Indi.GotPitch, Indi.RequestYaw), ca, sa, Position, out lo, out hi);
             // smoothed: from the measured acceleration it flickers tick to tick, and so did the Revoker's surfaces (bench chatter 3 -> 6)
             float k = dt / (OnsetTau + dt);
             RollAccelLo += (psDot + lo - RollAccelLo) * k;
@@ -231,9 +266,9 @@ namespace AutopilotMod.Fbw.Control
 
         /// <summary>
         /// The Δ range for which c + Δ·d (stability axes: roll, pitch, yaw; rad/s²) lies in the effectors' reachable increments, from
-        /// where they are to their usable range. False if d is ~0.
+        /// <paramref name="from"/> (their positions now, or neutral) to their usable range. False if d is ~0.
         /// </summary>
-        private bool LineRange(V3 d, V3 c, float ca, float sa, out float lo, out float hi)
+        private bool LineRange(V3 d, V3 c, float ca, float sa, float[] from, out float lo, out float hi)
         {
             lo = -99f;
             hi = 99f;
@@ -256,8 +291,8 @@ namespace AutopilotMod.Fbw.Control
                 lpA[j] = V3.Dot(e, m);
                 lpB[j] = V3.Dot(n1, m);
                 lpQ[j] = V3.Dot(n2, m);
-                lpLo[j] = UsableLo[j] - Position[j];
-                lpHi[j] = UsableHi[j] - Position[j];
+                lpLo[j] = UsableLo[j] - from[j];
+                lpHi[j] = UsableHi[j] - from[j];
             }
             float along = V3.Dot(e, c), across = V3.Dot(n1, c), pitchNeed = V3.Dot(n2, c);
             hi = (Furthest(1f, across, pitchNeed) - along) / dn;

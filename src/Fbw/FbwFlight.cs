@@ -60,7 +60,7 @@ namespace AutopilotMod.Fbw
                 Vector3 v = e.Vectoring;
                 if ((v.x > 0f || v.y > 0f) && e.VectoringTransform != null) vectoring.Add(e);
             }
-            Computer = new FlightComputer(NozzleBase + 2 * vectoring.Count);
+            Computer = new FlightComputer(NozzleBase + 2 * vectoring.Count, link.Engines.Count);
             curve = new LiftCurve(link.AeroParts.Count);
             foreach (SurfaceLink s in link.Surfaces)
                 if (s.Part != null && s.Hinge != null) surfaceOf[s.Part] = s;
@@ -182,6 +182,23 @@ namespace AutopilotMod.Fbw
                 Nozzle(fc, jy, vt != null && vec.y > 0f && my.SqrMagnitude > 0f && link.Aircraft.radarAlt >= 3f, now.y, vec.y, step, my, mass, rot);
             }
 
+            // engine-out yaw: each jet engine's thrust yaw in stability axes, along the body axis (a swivelled nozzle's yaw is the allocator's)
+            float ca = (float)Math.Cos(state.Alpha), sa = (float)Math.Sin(state.Alpha);
+            V3 bodyFwd = rot * new V3(0f, 0f, 1f);
+            for (int i = 0; i < link.Engines.Count; i++)
+            {
+                EngineLink e = link.Engines[i];
+                V3 m = V3.Zero;
+                JetNozzle[] nozzles = e.Alive ? e.Nozzles : null;
+                if (nozzles != null)
+                    foreach (JetNozzle n in nozzles)
+                        if (EngineLink.Pushing(n, out Transform tt, out float thrust) && thrust > 0f)
+                            m += V3.Cross(GameAero.V(tt.position) - cg, bodyFwd * thrust);
+                V3 acc = FlightComputer.ToAero(rot, MassProps.Solve(mass.Inertia, m));
+                fc.Cut.Yaw[i] = acc.Z * ca - acc.X * sa;
+            }
+            fc.Cut.Enabled = !LimitOverride; // the override gives the pilot all the thrust there is, sideslip or not
+
             fc.Step(pilot.pitch, pilot.roll, pilot.yaw, State(state), dt);
             Write(pilot, idle);
         }
@@ -285,9 +302,11 @@ namespace AutopilotMod.Fbw
                 s.Inputs.yaw = idle || span == 0f ? pilot.yaw : Math.Max(-1f, Math.Min(1f, cmd[surfaces.Count + k] / span));
             }
 
-            foreach (EngineLink e in link.Engines)
+            for (int i = 0; i < link.Engines.Count; i++)
             {
+                EngineLink e = link.Engines[i];
                 Pass(pilot, e.Inputs);
+                e.Inputs.throttle = pilot.throttle * Computer.Cut.Scale[i]; // the engine-out cut (1 = the pilot's throttle)
                 e.Inputs.pitch = e.Inputs.roll = e.Inputs.yaw = 0f;
             }
             for (int k = 0; k < vectoring.Count; k++)
@@ -300,7 +319,7 @@ namespace AutopilotMod.Fbw
             }
         }
 
-        // what the FBW does not move: throttle (and the idle airbrake / split it opens), brake, the custom axis
+        // what the FBW does not move: throttle (and the idle airbrake / split it opens; the engines' own throttle takes the engine-out cut), brake, the custom axis
         private static void Pass(ControlInputs from, ControlInputs to)
         {
             to.throttle = from.throttle;

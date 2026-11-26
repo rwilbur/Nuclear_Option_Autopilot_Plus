@@ -607,6 +607,7 @@ internal static class SelfCheck
         CheckSweep();
         CheckFoilKnee(dir);
         CheckFbwEnvelope(dir, jets, cases);
+        CheckFbwDamage(dir, jets);
     }
 
     /// <summary>
@@ -782,6 +783,7 @@ internal static class SelfCheck
         public float RateRms, QErr, QOver, PErr, BetaMax, QAbsMax, Chatter;
         public float AlphaHi, AlphaLo, NzHi, NzLo, AlphaMax, AlphaMin, NzMax, NzMin; // deg, g: extremes after the settling, and the limits
         public float PredErr; // deg rms: the governor's AoA prediction 0.5 s ahead against what happened
+        public float RollEnd, CutMax, CutEnd; // deg/s rms of the stability roll rate over the last second; the engine-out throttle cut
     }
 
     /// <summary>
@@ -789,12 +791,16 @@ internal static class SelfCheck
     /// Errors are mean |actual − commanded| over the second half, relative to the command; overshoot past the settled command; chatter =
     /// share of ticks a surface command reverses direction by more than 0.05 deg.
     /// </summary>
-    private static BenchResult Fly(string path, float scale, int delay, float noise, float seconds, Func<float, (float p, float r, float y)> stick, float speed = 200f, bool assist = true)
+    private static BenchResult Fly(string path, float scale, int delay, float noise, float seconds, Func<float, (float p, float r, float y)> stick, float speed = 200f, bool assist = true,
+                                   Func<FbwBench, bool> damage = null, float throttle = 0.5f)
     {
-        var b = new FbwBench(path) { EffectScale = scale, Delay = delay, Noise = noise, Assist = assist };
+        var b = new FbwBench(path) { EffectScale = scale, Delay = delay, Noise = noise, Assist = assist, Throttle = throttle };
         b.Start(speed);
         // the trim only balances lift and weight: let the FBW settle the start-up pitching moment hands-off first
         for (int k = 0; k < 120; k++) b.Step(0f, 0f, 0f);
+        damage?.Invoke(b); // phase 5: the hit lands on a settled jet
+        float cutMax = 0f;
+        double rateEnd = 0;
         // FBW_TRACE=<file>: write this run's per-tick trace (debugging the bench)
         string tracePath = Environment.GetEnvironmentVariable("FBW_TRACE");
         System.IO.StreamWriter trace = tracePath != null && (Environment.GetEnvironmentVariable("FBW_TRACE_JET") ?? "") == b.Unit ? new System.IO.StreamWriter(tracePath, true) : null;
@@ -812,6 +818,9 @@ internal static class SelfCheck
             AutopilotMod.Fbw.Control.FlightState s = b.State();
             float d = 57.29578f;
             if (k >= 60) rate2 += (s.P * s.P + s.Q * s.Q + s.R * s.R) * d * d;
+            float psNow = (s.P * (float)Math.Cos(s.Alpha) + s.R * (float)Math.Sin(s.Alpha)) * d;
+            if (k >= n - 60) rateEnd += psNow * psNow;
+            cutMax = Math.Max(cutMax, b.Fc.Cut.Cut);
             if (k >= half)
             {
                 qe += Math.Abs(s.Q - b.Fc.Law.Q); qc += Math.Abs(b.Fc.Law.Q);
@@ -858,7 +867,75 @@ internal static class SelfCheck
             AlphaHi = aHi, AlphaLo = aLo, NzHi = nHi, NzLo = nLo,
             AlphaMax = b.Fc.AlphaMax * 57.29578f, AlphaMin = b.Fc.AlphaMin * 57.29578f, NzMax = b.Fc.Governor.NzMax, NzMin = b.Fc.Governor.NzMin,
             PredErr = predN > 0 ? (float)Math.Sqrt(predE / predN) : 0f,
+            RollEnd = (float)Math.Sqrt(rateEnd / Math.Min(60, n)), CutMax = cutMax, CutEnd = b.Fc.Cut.Cut,
         };
+    }
+
+    /// <summary>
+    /// Phase 5: damage the live model sees (parts shot off, wings at half effectiveness, an off-centre store, an engine out) lands on a
+    /// settled jet, which then holds hands-off, rolls and pulls without departing: sideslip, AoA and g stay in hand and the rates settle.
+    /// </summary>
+    private static void CheckFbwDamage(string dir, string[] jets)
+    {
+        int Engine(FbwBench b, string name) { for (int k = 0; k < b.Engines; k++) if (b.EngineName(k) == name) return k; return -1; }
+        bool Kill(FbwBench b) { int k = Engine(b, "engine_L"); if (k < 0 || b.Engines < 2) return false; b.KillEngine(k); return true; }
+        // the same engine-out with the throttle cut off: what the cut is judged against (the probe bench has no computer yet)
+        bool KillNoCut(FbwBench b) { if (b.Fc != null) b.Fc.Cut.Enabled = false; return Kill(b); }
+        var hits = new (string name, float speed, float throttle, Func<FbwBench, bool> hit, Func<FbwBench, bool> without)[]
+        {
+            ("aileron_L off", 200f, 0.5f, b => b.Lose("aileron_L"), null),
+            ("wingtip_L off", 200f, 0.5f, b => b.Lose("wingtip_L"), null),
+            ("left wing x0.5", 200f, 0.5f, b => b.Weaken(n => n.StartsWith("wing") && n.EndsWith("_L"), 0.5f) > 0, null),
+            ("tail_L off", 200f, 0.5f, b => b.Lose("elevator_L") || b.Lose("canard_L"), null),
+            ("store 1 t left", 200f, 0.5f, b => { b.Store(new V3(-3f, -0.3f, 0f), 1000f); return true; }, null),
+            // full thrust on the live engine: slow, the yaw can't hold it all (the throttle cut's case); fast, it can (no cut)
+            ("engine_L out 65", 65f, 1f, Kill, KillNoCut),
+            ("engine_L out 80", 80f, 1f, Kill, KillNoCut),
+            ("engine_L out 120", 120f, 1f, Kill, null),
+            ("engine_L out 250", 250f, 1f, Kill, null),
+        };
+        var stick = new (string name, float secs, Func<float, (float, float, float)> s)[]
+        {
+            ("hold", 4f, t => (0f, 0f, 0f)),
+            ("roll", 4f, t => (0f, t > 0.5f && t < 1.8f ? 1f : 0f, 0f)),
+            ("roll left", 4f, t => (0f, t > 0.5f && t < 1.8f ? -1f : 0f, 0f)),
+            ("pull", 3f, t => (t > 0.5f ? -1f : 0f, 0f, 0f)),
+            ("roll+pull", 3f, t => (t > 0.5f ? -1f : 0f, t > 0.5f ? 1f : 0f, 0f)),
+        };
+        foreach (string jet in jets)
+        {
+            string path = System.IO.Path.Combine(dir, jet + ".json");
+            if (!System.IO.File.Exists(path)) continue;
+            foreach (var h in hits)
+            {
+                if (!h.hit(new FbwBench(path))) continue; // this jet has no such part (or a single engine)
+                foreach (var m in stick)
+                {
+                    BenchResult r = Fly(path, 1f, 0, 0f, m.secs, m.s, h.speed, damage: h.hit, throttle: h.throttle);
+                    BenchResult? w = h.without != null ? Fly(path, 1f, 0, 0f, m.secs, m.s, h.speed, damage: h.without, throttle: h.throttle) : (BenchResult?)null;
+                    Console.WriteLine($"damage {jet,-15} {h.name,-16} {m.name,-9} beta {r.BetaMax,4:F1}{(w.HasValue ? $" (no cut {w.Value.BetaMax:F1})" : "")} AoA {r.AlphaLo:F1}..{r.AlphaHi:F1} (limits {r.AlphaMin:F1}..{r.AlphaMax:F1}) nz {r.NzLo:F2}..{r.NzHi:F2} | roll rate, last 1 s {r.RollEnd:F1} deg/s | throttle cut max {r.CutMax:F2} end {r.CutEnd:F2}");
+                    string what = $"damage {jet} {h.name} {m.name}";
+                    Check(r.BetaMax < 10f, $"{what}: sideslip held ({r.BetaMax:F1} deg)");
+                    Check(r.AlphaHi < r.AlphaMax + 5f && r.AlphaLo > r.AlphaMin - 5f, $"{what}: AoA inside its limits ({r.AlphaLo:F1}..{r.AlphaHi:F1})");
+                    Check(r.NzHi < r.NzMax + 0.5f && r.NzLo > r.NzMin - 0.5f, $"{what}: load factor inside its limits ({r.NzLo:F2}..{r.NzHi:F2})");
+                    // 5 deg/s: the Ifrit at 65 m/s with full thrust on one engine sits at the edge of its roll capacity, and its bank drifts at 3.5
+                    if (!m.name.Contains("pull")) Check(r.RollEnd < 5f, $"{what}: the roll stops hands-off ({r.RollEnd:F1} deg/s rms over the last second)");
+                    if (w.HasValue) Check(r.BetaMax < w.Value.BetaMax + 0.5f, $"{what}: the throttle cut never adds sideslip ({r.BetaMax:F1} deg, {w.Value.BetaMax:F1} without)");
+                    // steady flight only: a sustained rolling pull at 120 m/s does run the Ifrit's yaw short, and a cut there is the design
+                    if (h.speed >= 120f && !m.name.Contains("pull")) Check(r.CutMax < 0.01f, $"{what}: no throttle cut while the yaw holds the thrust ({r.CutMax:F2})");
+                }
+            }
+        }
+        // the cut's own logic, one engine each side: none while the asymmetry fits, cut to fit when it doesn't, given back as authority grows
+        var cut = new AutopilotMod.Fbw.Control.ThrustCut(2);
+        cut.Yaw[0] = 0f; cut.Yaw[1] = -1f; // left engine dead: the right one yaws left (-), the effectors must give +
+        for (int k = 0; k < 600; k++) cut.Update(-2f, 2f, 1f / 60f);
+        Check(cut.Cut == 0f && cut.Scale[1] == 1f, $"thrust cut: none while the yaw holds the asymmetry ({cut.Cut:F2})");
+        for (int k = 0; k < 600; k++) { cut.Yaw[1] = -2f * cut.Scale[1]; cut.Update(-1f, 1f, 1f / 60f); } // thrust follows at once here
+        Check(Near(-cut.Yaw[1], (1f - AutopilotMod.Fbw.Control.ThrustCut.Reserve) * 1f, 0.05f) && cut.Scale[0] == 1f,
+              $"thrust cut: the strong side cut to what the yaw holds ({-cut.Yaw[1]:F2} of {(1f - AutopilotMod.Fbw.Control.ThrustCut.Reserve):F2}), the dead side untouched");
+        for (int k = 0; k < 900; k++) { cut.Yaw[1] = -2f * cut.Scale[1]; cut.Update(-4f, 4f, 1f / 60f); }
+        Check(cut.Cut == 0f, $"thrust cut: given back when the authority grows ({cut.Cut:F2})");
     }
 
     /// <summary>The FBW's allocator and channel mixing.</summary>
